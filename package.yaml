@@ -1,0 +1,74 @@
+name:                pcre2
+version:             0.1.0.0
+github:              "githubuser/pcre2"
+license:             BSD3
+author:              "Author name here"
+maintainer:          "example@example.com"
+copyright:           "2020 Author name here"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/githubuser/pcre2#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- containers
+- deepseq
+- mtl
+- template-haskell
+- text
+
+library:
+  source-dirs: src/hs
+  include-dirs: src/c
+  ghc-options:
+  - -optc=-DPCRE2_CODE_UNIT_WIDTH=16
+  - -optc=-Wno-discarded-qualifiers
+  - -optc=-Wno-incompatible-pointer-types
+
+  - -ddump-splices
+
+  extra-libraries:
+  - pcre2-16
+
+executables:
+  pcre2-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+
+    - -ddump-splices
+
+    # GHC Core
+    - -ddump-simpl
+    - -dsuppress-idinfo
+    - -dsuppress-coercions
+    - -dsuppress-type-applications
+    - -dsuppress-uniques
+    - -dsuppress-module-prefixes
+
+    dependencies:
+    - pcre2
+
+tests:
+  pcre2-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - pcre2
