@@ -81,7 +81,7 @@ re = QuasiQuoter {
             -- One or more named captures.  Attempt to bind only those to local
             -- variables of the same names.
             Just numberedNames -> viewP e p where
-                (numbers, names) = unzip numberedNames
+                (numbers, names) = NE.unzip numberedNames
                 whitelistQ = liftData $ Just numbers
                 _csQ = [e| _capturesInternal $(matcherQ s) $(whitelistQ) |]
                 e = [e| view $ $(_csQ) . to NE.toList |]

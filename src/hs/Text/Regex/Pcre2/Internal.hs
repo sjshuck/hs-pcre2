@@ -18,11 +18,13 @@ import           Control.Applicative        (Alternative(..))
 import           Control.DeepSeq            (force)
 import           Control.Exception          hiding (TypeError)
 import           Control.Monad.State.Strict
+import           Data.Bifunctor             (first)
 import           Data.Either                (partitionEithers)
 import           Data.Function              ((&))
 import           Data.Functor               ((<&>))
 import           Data.Functor.Const         (Const(..))
 import           Data.Functor.Identity      (Identity(..))
+import           Data.IntMap.Strict         (IntMap, (!?))
 import qualified Data.IntMap.Strict         as IM
 import           Data.IORef
 import           Data.List                  (foldl', intercalate)
@@ -45,18 +47,26 @@ import qualified GHC.TypeLits               as TypeLits
 import           System.IO.Unsafe           (unsafePerformIO)
 import           Text.Regex.Pcre2.Foreign
 
--- | A register that stores any exception thrown from within user-supplied
--- closures, such as callouts, that will be rethrown after pcre2_match or
--- similar.
-type ERef = IORef (Maybe SomeException)
+-- | A register that stores data computed during callouts, such as exceptions
+-- thrown, that will be inspected after @pcre2_match@ or similar completes.
+data CalloutState
+    = CalloutState {
+        calloutStateException :: Maybe SomeException,
+        calloutStateSubsLog   :: IntMap SubCalloutResult}
+
+initCalloutState :: CalloutState
+initCalloutState = CalloutState {
+    calloutStateException = Nothing,
+    calloutStateSubsLog   = IM.empty}
 
 data CompileCtxEtc = CompileCtxEtc {
     compileCtxEtcForeignPtr :: Maybe CompileContext,
-    compileCtxEtcERef       :: Maybe ERef}
+    compileCtxEtcERef       :: Maybe (IORef (Maybe SomeException))}
 
 data MatchCtxEtc = MatchCtxEtc {
     matchCtxEtcForeignPtr :: Maybe MatchContext,
-    matchCtxEtcCallout    :: Maybe (CalloutInfo -> IO CalloutResult)}
+    matchCtxEtcCallout    :: Maybe (CalloutInfo -> IO CalloutResult),
+    matchCtxEtcSubCallout :: Maybe (SubCalloutInfo -> IO SubCalloutResult)}
 
 -- | There is no @nullForeignPtr@ to pass to `withForeignPtr`, so we have to
 -- fake it with a `Maybe`.
@@ -81,8 +91,7 @@ extractCompileCtxEtc = do
 
             forM_ ctxUpds $ \update -> update ctx
             when (xtraOpts /= 0) $ do
-                result <- pcre2_set_compile_extra_options ctxPtr xtraOpts
-                check (== 0) result
+                pcre2_set_compile_extra_options ctxPtr xtraOpts >>= check (== 0)
             
             return ctx
 
@@ -140,8 +149,9 @@ extractCode patt (CompileCtxEtc {..}) = do
 extractMatchCtxEtc :: StateT [AppliedOption] IO MatchCtxEtc
 extractMatchCtxEtc = do
     ctxUpds <- state extractMatchContextUpdates
-    matchCtxEtcCallout <- safeLast <$> state extractCallouts
-    
+    matchCtxEtcCallout <- state extractCallout
+    matchCtxEtcSubCallout <- state extractSubCallout
+
     matchCtxEtcForeignPtr <- if null ctxUpds
         then return Nothing
         else liftIO $ Just <$> do
@@ -160,62 +170,109 @@ extractMatchCtxEtc = do
 -- and inspection.
 type Matcher = Text -> IO (CInt, MatchData)
 
--- | Temporarily present a @\*pcre2_match_context@ for @pcre2_match()@ and
--- similar to use.  Depending on various options, resource allocation and
--- deallocation may be required.
-useMatchCtxEtc :: MatchCtxEtc -> (Ptr Pcre2_match_context -> IO a) -> IO a
-useMatchCtxEtc (MatchCtxEtc {..}) = case matchCtxEtcCallout of
-    -- No callout.
-    Nothing -> case matchCtxEtcForeignPtr of
-        -- No match context, so NULL.
-        Nothing -> \action -> action nullPtr
-        -- Pre-existing match context, so keep reusing it.
-        Just ctx -> \action -> withForeignPtr ctx action
+data MatchState = MatchState {
+    matchStateCtx :: Maybe MatchContext,
+    matchStateRef :: Maybe (IORef CalloutState)}
 
-    -- Callout.  To save and rethrow exceptions that occur in callouts during
-    -- potentially concurrent matches, we need to create a new ERef for each
-    -- match.  This means a new FunPtr to close on it, and that means a new
-    -- match context to set it to.
-    Just f -> \action -> do
-        eRef :: ERef <- newIORef Nothing
-        bracket mkCtxPtr pcre2_match_context_free $ \ctxPtr -> do
-            -- The actual C function pointer to be supplied to @pcre2_match()@.
-            -- Force the user-supplied Haskell callout function and its result,
-            -- catching any exceptions and saving them.
-            let mkFPtr = mkCallout $ \blockPtr _ -> do
-                    info <- mkCalloutInfo blockPtr
-                    try (evaluate f >>= ($ info) >>= evaluate) >>= \case
-                        Right result -> return $ case result of
-                            CalloutProceed     -> 0
-                            CalloutNoMatchHere -> 1
-                            CalloutNoMatch     -> pcre2_ERROR_NOMATCH
-                        Left e -> do
-                            writeIORef eRef $ Just e
-                            return pcre2_ERROR_CALLOUT
-            bracket mkFPtr freeHaskellFunPtr $ \fPtr -> do
+-- | Temporarily present a @pcre2_match_context@ for @pcre2_match()@ (or
+-- @pcre2_substitute()@) to use.  Depending on various options, resource
+-- allocation and deallocation may be required.  For user-defined callouts, the
+-- subject itself is required to be available as info.
+getMatchState :: MatchCtxEtc -> Text -> IO MatchState
+getMatchState (MatchCtxEtc {..})
+    | null matchCtxEtcCallout && null matchCtxEtcSubCallout = \_ ->
+        return noCallouts
+
+    | otherwise = \subject -> do
+        -- Callouts.  To save and inspect state that occurs in callouts
+        -- during potentially concurrent matches, we need to create a new state
+        -- ref for each match.  This means a new FunPtr to close on it, and that
+        -- means a new match context to set it to.
+        calloutStateRef <- newIORef initCalloutState
+        ctx <- do
+            ctxPtr <- ctxPtrForCallouts
+            Conc.newForeignPtr <*> pcre2_match_context_free $ ctxPtr
+
+        -- Install C function pointers in the @pcre2_match_context@.  When
+        -- dereferenced and called, they will force the user-supplied Haskell
+        -- callout functions and their results, catching any exceptions and
+        -- saving them.
+
+        -- Install callout, if any
+        forM_ matchCtxEtcCallout $ \f -> do
+            fPtr <- mkCallout $ \blockPtr _ -> do
+                info <- getCalloutInfo subject blockPtr
+                resultOrE <- try $ do
+                    f <- evaluate f
+                    result <- f info
+                    evaluate result
+                case resultOrE of
+                    Right result -> return $ case result of
+                        CalloutProceed     -> 0
+                        CalloutNoMatchHere -> 1
+                        CalloutNoMatch     -> pcre2_ERROR_NOMATCH
+                    Left e -> do
+                        modifyIORef' calloutStateRef $ \cst -> cst {
+                            calloutStateException = Just e}
+                        return pcre2_ERROR_CALLOUT
+            Conc.addForeignPtrFinalizer ctx $ freeHaskellFunPtr fPtr
+            withForeignPtr ctx $ \ctxPtr ->
                 pcre2_set_callout ctxPtr fPtr nullPtr >>= check (== 0)
-                action ctxPtr
-                    -- Rethrow exception (if any) originating from the callout.
-                    `finally` (readIORef eRef >>= mapM_ throwIO)
+
+        -- Install substitution callout, if any
+        forM_ matchCtxEtcSubCallout $ \f -> do
+            fPtr <- mkCallout $ \blockPtr _ -> do
+                info <- getSubCalloutInfo subject blockPtr
+                resultOrE <- try $ do
+                    f <- evaluate f
+                    result <- f info
+                    evaluate result
+                case resultOrE of
+                    Right result -> do
+                        modifyIORef' calloutStateRef $ \cst -> cst {
+                            calloutStateSubsLog =
+                                let subsCount = subCalloutSubsCount info
+                                    subsLog = calloutStateSubsLog cst
+                                in IM.insert subsCount result subsLog}
+                        return $ case result of
+                            SubCalloutAccept ->  0
+                            SubCalloutSkip   ->  1
+                            SubCalloutAbort  -> -1
+                    Left e -> do
+                        modifyIORef' calloutStateRef $ \cst -> cst {
+                            calloutStateException = Just e}
+                        return (-1)
+            Conc.addForeignPtrFinalizer ctx $ freeHaskellFunPtr fPtr
+            withForeignPtr ctx $ \ctxPtr -> do
+                result <- pcre2_set_substitute_callout ctxPtr fPtr nullPtr
+                check (== 0) result
+
+        return $ MatchState {
+            matchStateCtx = Just ctx,
+            matchStateRef = Just calloutStateRef}
 
     where
-    mkCtxPtr = case matchCtxEtcForeignPtr of
+    noCallouts = MatchState {
+        matchStateCtx = matchCtxEtcForeignPtr,
+        matchStateRef = Nothing}
+    ctxPtrForCallouts = case matchCtxEtcForeignPtr of
         -- No pre-existing match context, so create one afresh.
-        Nothing  -> pcre2_match_context_create nullPtr
+        Nothing -> pcre2_match_context_create nullPtr
         -- Pre-existing match context, so copy it.
         Just ctx -> withForeignPtr ctx pcre2_match_context_copy
 
 extractMatcher :: Code -> MatchCtxEtc -> State [AppliedOption] Matcher
 extractMatcher code matchCtxEtc = do
     opts <- state extractMatchOptions
-    let withCtxPtr = useMatchCtxEtc matchCtxEtc
+    let matchStateWithSubj = getMatchState matchCtxEtc
 
     return $ \subject -> withForeignPtr code $ \codePtr -> do
         matchDataPtr <- pcre2_match_data_create_from_pattern codePtr nullPtr
         matchData <- Conc.newForeignPtr <*> pcre2_match_data_free $ matchDataPtr
 
+        MatchState {..} <- matchStateWithSubj subject
         result <- Text.useAsPtr subject $ \subjPtr subjCUs ->
-            withCtxPtr $ \ctxPtr -> pcre2_match
+            withForeignOrNullPtr matchStateCtx $ \ctxPtr -> pcre2_match
                 codePtr
                 (castCUs subjPtr)
                 (fromIntegral subjCUs)
@@ -223,46 +280,91 @@ extractMatcher code matchCtxEtc = do
                 opts
                 matchDataPtr
                 ctxPtr
+        maybeRethrow matchStateRef
 
         return (result, matchData)
 
+maybeRethrow :: Maybe (IORef CalloutState) -> IO ()
+maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
+
 extractSubber :: Code -> MatchCtxEtc -> Text -> State [AppliedOption] Subber
-extractSubber code matchCtxEtc@(MatchCtxEtc {..}) replacement = do
+extractSubber code matchCtxEtc replacement = do
     opts <- state extractMatchOptions
-    let withCtxPtr = useMatchCtxEtc matchCtxEtc
 
     return $ \subject ->
         withForeignPtr code $ \codePtr ->
         Text.useAsPtr subject $ \subjPtr subjCUs ->
         Text.useAsPtr replacement $ \replPtr replCUs ->
-        allocaArray (fromIntegral outBufCUs) $ \outBufPtr ->
-        alloca $ \outLenPtr -> do
-            let go = withCtxPtr $ \ctxPtr -> pcre2_substitute
-                    codePtr
-                    (castCUs subjPtr)
-                    (fromIntegral subjCUs)
-                    0
-                    opts
-                    nullPtr
-                    ctxPtr
-                    (castCUs replPtr)
-                    (fromIntegral replCUs)
-                    outBufPtr
-                    outLenPtr
+        alloca $ \outLenPtr ->
+            runSubber matchCtxEtc opts subject codePtr
+                subjPtr subjCUs replPtr replCUs outLenPtr
 
-            poke outLenPtr outBufCUs
-            result <- go
-            when (result < 0) $ throwIO $ Pcre2Exception result
-            out <- if result == 0
-                then return subject
-                else do
-                    outLen <- peek outLenPtr
-                    Text.fromPtr (castCUs outBufPtr) (fromIntegral outLen)
+-- | Helper for `extractSubber`.
+runSubber
+    :: MatchCtxEtc -> CUInt -> Text -> Ptr Pcre2_code
+    -> Ptr Word16 -> Text.I16 -> Ptr Word16 -> Text.I16 -> Ptr PCRE2_SIZE
+    -> IO (CInt, Text)
+runSubber matchCtxEtc@(MatchCtxEtc {..}) opts subject codePtr
+    subjPtr subjCUs replPtr replCUs outLenPtr = do
 
-            return (result, Just out)
+    poke outLenPtr $ fromIntegral initOutLen
+    MatchState {..} <- getMatchState matchCtxEtc subject
+    firstAttempt <- withForeignOrNullPtr matchStateCtx $ \ctxPtr ->
+        allocaArray initOutLen $ \outBufPtr -> do
+            result <- sub pcre2_SUBSTITUTE_OVERFLOW_LENGTH ctxPtr outBufPtr
+            maybeRethrow matchStateRef
+            if result == pcre2_ERROR_NOMEMORY
+                then Left <$> case matchStateRef of
+                    Nothing       -> return IM.empty
+                    Just stateRef -> calloutStateSubsLog <$> readIORef stateRef
+                else Right <$> checkAndGetOutput result outBufPtr
+
+    case firstAttempt of
+        Right resultAndOutput -> return resultAndOutput
+        Left subsLog          -> do
+            -- The output was bigger than we guessed.  Try again.
+            computedOutLen <- fromIntegral <$> peek outLenPtr
+            let matchCtxEtc' = matchCtxEtc {
+                    -- Do not run capture callouts again.
+                    matchCtxEtcCallout = Nothing,
+                    -- Do not run any substitution callouts run previously.
+                    matchCtxEtcSubCallout = fastFwd <$> matchCtxEtcSubCallout}
+                fastFwd f = \info -> case subsLog !? subCalloutSubsCount info of
+                    Just result -> return result
+                    Nothing     -> f info
+            MatchState {..} <- getMatchState matchCtxEtc' subject
+            withForeignOrNullPtr matchStateCtx $ \ctxPtr ->
+                allocaArray computedOutLen $ \outBufPtr -> do
+                    result <- sub 0 ctxPtr outBufPtr
+                    maybeRethrow matchStateRef
+                    checkAndGetOutput result outBufPtr
 
     where
-    outBufCUs = 2 ^ 20
+
+    checkAndGetOutput :: CInt -> PCRE2_SPTR -> IO (CInt, Text)
+    checkAndGetOutput 0      _         = return (0, subject)
+    checkAndGetOutput result outBufPtr = do
+        check (>= 0) result
+        outLen <- peek outLenPtr
+        out <- Text.fromPtr (castCUs outBufPtr) (fromIntegral outLen)
+        return (result, out)
+
+    sub :: CUInt -> Ptr Pcre2_match_context -> PCRE2_SPTR -> IO CInt
+    sub auxOpts ctxPtr outBufPtr = pcre2_substitute
+        codePtr
+        (castCUs subjPtr)
+        (fromIntegral subjCUs)
+        0
+        (opts .|. auxOpts)
+        nullPtr
+        ctxPtr
+        (castCUs replPtr)
+        (fromIntegral replCUs)
+        outBufPtr
+        outLenPtr
+
+    -- Guess the size of the output to be <= 2x that of the subject.
+    initOutLen = Text.length subject * 2
 
 data SliceRange = SliceRange
     {-# UNPACK #-} !Text.I16
@@ -304,7 +406,7 @@ mkMatcher option patt = runStateT extractAll (applyOption option) <&> \case
         matchCtxEtc <- extractMatchCtxEtc
         state . runState $ extractMatcher code matchCtxEtc
 
-type Subber = Text -> IO (CInt, Maybe Text)
+type Subber = Text -> IO (CInt, Text)
 
 mkSubber :: Option -> Text -> Text -> IO Subber
 mkSubber option patt replacement =
@@ -361,7 +463,7 @@ getCaptureNames codePtr = do
     
     captureCount <- getInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
 
-    return $ map (\i -> IM.lookup i names) [0 .. fromIntegral captureCount]
+    return $ map (names !?) [0 .. fromIntegral captureCount]
 
 getInfo :: (Storable a) => Ptr Pcre2_code -> CUInt -> IO a
 getInfo codePtr what = alloca $ \wherePtr -> do
@@ -431,13 +533,25 @@ data Option
     | NotEmptyAtStart
     | PartialHard
     | PartialSoft
+    -- Substitute options
+    | SubstituteGlobal
+    | SubstituteUnknownEmpty
     -- Callout
     | Callout (CalloutInfo -> IO CalloutResult)
+    -- Substitute callout
+    | SubstituteCallout (SubCalloutInfo -> IO SubCalloutResult)
     -- Match context options
     | OffsetLimit Int
     | HeapLimit Int
     | MatchLimit Int
     | DepthLimit Int
+
+data SubCalloutInfo
+    = SubCalloutInfo {
+        subCalloutSubsCount   :: Int,
+        subCalloutCaptures    :: NonEmpty (Maybe Text),
+        subCalloutSubject     :: Text,
+        subCalloutReplacement :: Text}
 
 foreign import ccall "wrapper" mkRecursionGuard
     :: (CUInt -> Ptr a -> IO CInt)
@@ -452,7 +566,6 @@ data CalloutInfo
         calloutIndex       :: CalloutIndex,
         calloutCaptures    :: NonEmpty (Maybe Text),
         calloutSubject     :: Text,
-        calloutSubjectPos  :: Int,
         calloutMark        :: Maybe Text,
         calloutIsFirst     :: Bool,
         calloutBacktracked :: Bool}
@@ -466,9 +579,14 @@ data CalloutResult
     = CalloutProceed
     | CalloutNoMatchHere
     | CalloutNoMatch
-    
-mkCalloutInfo :: Ptr Pcre2_callout_block -> IO CalloutInfo
-mkCalloutInfo blockPtr = do
+
+data SubCalloutResult
+    = SubCalloutAccept
+    | SubCalloutSkip
+    | SubCalloutAbort
+
+getCalloutInfo :: Text -> Ptr Pcre2_callout_block -> IO CalloutInfo
+getCalloutInfo subject blockPtr = do
     calloutIndex <- do
         str <- pcre2_callout_block_callout_string blockPtr
         if str == nullPtr
@@ -485,15 +603,12 @@ mkCalloutInfo blockPtr = do
                 len <- pcre2_callout_block_callout_string_length blockPtr
                 CalloutName <$> Text.fromPtr (castCUs str) (fromIntegral len)
 
-    calloutSubject <- do
-        subjPtr <- pcre2_callout_block_subject blockPtr
-        subjLen <- pcre2_callout_block_subject_length blockPtr
-        Text.fromPtr (castCUs subjPtr) (fromIntegral subjLen)
+    let calloutSubject = subject
 
     calloutCaptures <- do
         ovecPtr <- pcre2_callout_block_offset_vector blockPtr
-        nTop <- pcre2_callout_block_capture_top blockPtr
-        forM (0 :| [1 .. fromIntegral nTop - 1]) $ \n -> do
+        top <- pcre2_callout_block_capture_top blockPtr
+        forM (0 :| [1 .. fromIntegral top - 1]) $ \n -> do
             start <- peekElemOff ovecPtr $ n * 2
             if start == pcre2_UNSET
                 then return Nothing
@@ -502,9 +617,6 @@ mkCalloutInfo blockPtr = do
                     return $ slice calloutSubject $ SliceRange
                         (fromIntegral start)
                         (fromIntegral end)
-
-    calloutSubjectPos <-
-        fromIntegral <$> pcre2_callout_block_current_position blockPtr
 
     calloutMark <- do
         ptr <- pcre2_callout_block_mark blockPtr
@@ -524,6 +636,37 @@ mkCalloutInfo blockPtr = do
         calloutBacktracked = flags .&. pcre2_CALLOUT_BACKTRACK /= 0
 
     return $ CalloutInfo {..}
+
+getSubCalloutInfo
+    :: Text -> Ptr Pcre2_substitute_callout_block -> IO SubCalloutInfo
+getSubCalloutInfo subject blockPtr = do
+    subCalloutSubsCount <-
+        fromIntegral <$> pcre2_substitute_callout_block_subscount blockPtr
+    
+    subCalloutCaptures <- do
+        ovecPtr <- pcre2_substitute_callout_block_ovector blockPtr
+        ovecCount <- pcre2_substitute_callout_block_oveccount blockPtr
+        forM (0 :| [1 .. fromIntegral ovecCount - 1]) $ \n -> do
+            start <- peekElemOff ovecPtr $ n * 2
+            if start == pcre2_UNSET
+                then return Nothing
+                else Just <$> do
+                    end <- peekElemOff ovecPtr $ n * 2 + 1
+                    return $ slice subject $ SliceRange
+                        (fromIntegral start)
+                        (fromIntegral end)
+
+    let subCalloutSubject = subject
+
+    subCalloutReplacement <- do
+        outPtr <- pcre2_substitute_callout_block_output blockPtr
+        offsetsPtr <- pcre2_substitute_callout_block_output_offsets blockPtr
+        [start, end] <- mapM (peekElemOff offsetsPtr) [0, 1]
+        Text.fromPtr
+            (castCUs $ advancePtr outPtr $ fromIntegral start)
+            (fromIntegral $ end - start)
+
+    return $ SubCalloutInfo {..}
 
 -- | Equivalent to @flip fix@.
 --
@@ -596,15 +739,22 @@ applyOption = \case
     CompileRecursionGuard f -> [CompileRecursionGuardOption f]
 
     -- MatchOption
-    NotBol          -> [MatchOption pcre2_NOTBOL]
-    NotEol          -> [MatchOption pcre2_NOTEOL]
-    NotEmpty        -> [MatchOption pcre2_NOTEMPTY]
-    NotEmptyAtStart -> [MatchOption pcre2_NOTEMPTY_ATSTART]
-    PartialHard     -> [MatchOption pcre2_PARTIAL_HARD]
-    PartialSoft     -> [MatchOption pcre2_PARTIAL_SOFT]
+    NotBol                 -> [MatchOption pcre2_NOTBOL]
+    NotEol                 -> [MatchOption pcre2_NOTEOL]
+    NotEmpty               -> [MatchOption pcre2_NOTEMPTY]
+    NotEmptyAtStart        -> [MatchOption pcre2_NOTEMPTY_ATSTART]
+    PartialHard            -> [MatchOption pcre2_PARTIAL_HARD]
+    PartialSoft            -> [MatchOption pcre2_PARTIAL_SOFT]
+    SubstituteGlobal       -> [MatchOption pcre2_SUBSTITUTE_GLOBAL]
+    SubstituteUnknownEmpty -> [
+        MatchOption pcre2_SUBSTITUTE_UNKNOWN_UNSET,
+        MatchOption pcre2_SUBSTITUTE_UNSET_EMPTY]
 
     -- CalloutOption
     Callout f -> [CalloutOption f]
+
+    -- SubstituteCalloutOption
+    SubstituteCallout f -> [SubstituteCalloutOption f]
 
     -- MatchContextOption
     OffsetLimit limit -> applyOption UseOffsetLimit ++ unary
@@ -627,6 +777,7 @@ data AppliedOption
     | CompileRecursionGuardOption (Int -> IO Bool)
     | MatchOption CUInt
     | CalloutOption (CalloutInfo -> IO CalloutResult)
+    | SubstituteCalloutOption (SubCalloutInfo -> IO SubCalloutResult)
     | MatchContextOption (MatchContext -> IO ())
 
 extractCompileContextUpdates
@@ -636,8 +787,8 @@ extractCompileContextUpdates opts = partitionEithers $ opts <&> \case
     opt                         -> Right opt
 
 extractCompileExtraOptions :: [AppliedOption] -> (CUInt, [AppliedOption])
-extractCompileExtraOptions opts = (foldl' (.|.) 0 flags, rest) where
-    (flags, rest) = partitionEithers $ opts <&> \case
+extractCompileExtraOptions opts =
+    first (foldl' (.|.) 0) $ partitionEithers $ opts <&> \case
         CompileExtraOption flag -> Left flag
         opt                     -> Right opt
     
@@ -647,8 +798,8 @@ extractRecursionGuards opts = partitionEithers $ opts <&> \case
     opt                           -> Right opt
 
 extractCompileOptions :: [AppliedOption] -> (CUInt, [AppliedOption])
-extractCompileOptions opts = (foldl' (.|.) 0 flags, rest) where
-    (flags, rest) = partitionEithers $ opts <&> \case
+extractCompileOptions opts =
+    first (foldl' (.|.) 0) $ partitionEithers $ opts <&> \case
         CompileOption flag -> Left flag
         opt                -> Right opt
 
@@ -658,15 +809,23 @@ extractMatchContextUpdates opts = partitionEithers $ opts <&> \case
     MatchContextOption update -> Left update
     opt                       -> Right opt
 
-extractCallouts
-    :: [AppliedOption] -> ([CalloutInfo -> IO CalloutResult], [AppliedOption])
-extractCallouts opts = partitionEithers $ opts <&> \case
+extractCallout
+    :: [AppliedOption]
+    -> (Maybe (CalloutInfo -> IO CalloutResult), [AppliedOption])
+extractCallout opts = first safeLast $ partitionEithers $ opts <&> \case
     CalloutOption f -> Left f
     opt             -> Right opt
 
+extractSubCallout
+    :: [AppliedOption]
+    -> (Maybe (SubCalloutInfo -> IO SubCalloutResult), [AppliedOption])
+extractSubCallout opts = first safeLast $ partitionEithers $ opts <&> \case
+    SubstituteCalloutOption f -> Left f
+    opt                       -> Right opt
+
 extractMatchOptions :: [AppliedOption] -> (CUInt, [AppliedOption])
-extractMatchOptions opts = (foldl' (.|.) 0 flags, rest) where
-    (flags, rest) = partitionEithers $ opts <&> \case
+extractMatchOptions opts =
+    first (foldl' (.|.) 0) $ partitionEithers $ opts <&> \case
         MatchOption flag -> Left flag
         opt              -> Right opt
 

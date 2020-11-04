@@ -614,7 +614,7 @@ foreign import capi safe "pcre2.h" pcre2_substitute
 constant "SUBSTITUTE_GLOBAL" ''CUInt
 -- constant "SUBSTITUTE_MATCHED" ''CUInt
 constant "SUBSTITUTE_OVERFLOW_LENGTH" ''CUInt
--- constant "SUBSTITUTE_OVERFLOW_LITERAL" ''CUInt
+-- constant "SUBSTITUTE_LITERAL" ''CUInt
 constant "SUBSTITUTE_UNKNOWN_UNSET" ''CUInt
 constant "SUBSTITUTE_UNSET_EMPTY" ''CUInt
 constant "SUBSTITUTE_EXTENDED" ''CUInt
