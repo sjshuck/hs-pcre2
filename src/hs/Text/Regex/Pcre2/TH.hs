@@ -28,7 +28,7 @@ memoMatcher patt = unsafePerformIO $ do
     case Map.lookup patt cache of
         Just matcher -> return matcher
         Nothing      -> do
-            let matcher = unsafePerformIO $ mkMatcher mempty patt
+            let matcher = unsafePerformIO $ extractAllMatcher mempty patt
             atomicModifyIORef' globalMatcherCache $ \cache ->
                 (Map.insert patt matcher cache, ())
             return matcher
@@ -87,9 +87,9 @@ re = QuasiQuoter {
                 e = [e| view $ $(_csQ) . to NE.toList |]
                 p = listP $ map (varP . mkName . Text.unpack) $ NE.toList names,
 
-    quoteType = const $ fail "re: quoteType not implemented",
+    quoteType = const $ fail "re: cannot produce a type",
 
-    quoteDec = const $ fail "re: quoteDec not implmented"}
+    quoteDec = const $ fail "re: cannot produce declarations"}
 
 _re :: QuasiQuoter
 _re = QuasiQuoter {
@@ -98,8 +98,8 @@ _re = QuasiQuoter {
             wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
         in _capturesInternal $(matcherQ s) Nothing . wrapped |],
 
-    quotePat = const $ fail "re: quotePat not implemented",
+    quotePat = const $ fail "_re: cannot produce a pattern",
 
-    quoteType = const $ fail "re: quoteType not implemented",
+    quoteType = const $ fail "_re: cannot produce a type",
 
-    quoteDec = const $ fail "re: quoteDec not implmented"}
+    quoteDec = const $ fail "_re: cannot produce declarations"}

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 6d886e573c390deceeb0ff5a33ea3f74808e295e1022c239028293caf04999eb
+-- hash: 84faf9024546bcc335c6ea117d05042a962fb2bc28af58f37e7c64746979ed32
 
 name:           pcre2
 version:        0.1.0.0
@@ -36,7 +36,7 @@ library
       Paths_pcre2
   hs-source-dirs:
       src/hs
-  ghc-options: -optc=-DPCRE2_CODE_UNIT_WIDTH=16 -optc=-Wno-discarded-qualifiers -optc=-Wno-incompatible-pointer-types -ddump-splices
+  ghc-options: -optc=-DPCRE2_CODE_UNIT_WIDTH=16 -optc=-Wno-discarded-qualifiers -optc=-Wno-incompatible-pointer-types
   include-dirs:
       src/c
   extra-libraries:
@@ -44,7 +44,6 @@ library
   build-depends:
       base >=4.7 && <5
     , containers
-    , deepseq
     , mtl
     , template-haskell
     , text
@@ -56,11 +55,10 @@ executable pcre2-exe
       Paths_pcre2
   hs-source-dirs:
       app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -ddump-splices -ddump-simpl -dsuppress-idinfo -dsuppress-coercions -dsuppress-type-applications -dsuppress-uniques -dsuppress-module-prefixes
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
     , containers
-    , deepseq
     , mtl
     , pcre2
     , template-haskell
@@ -78,7 +76,6 @@ test-suite pcre2-test
   build-depends:
       base >=4.7 && <5
     , containers
-    , deepseq
     , mtl
     , pcre2
     , template-haskell

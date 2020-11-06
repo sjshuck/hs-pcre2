@@ -139,7 +139,6 @@ foreign import capi safe "pcre2.h" pcre2_match_context_free
 
 -- ** Match context setters
 
--- TODO See docs to see how this works
 foreign import capi unsafe "pcre2.h" pcre2_set_callout
     :: Ptr Pcre2_match_context
     -> FunPtr (Ptr Pcre2_callout_block -> Ptr a -> IO CInt)

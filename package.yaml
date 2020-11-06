@@ -22,7 +22,6 @@ description:         Please see the README on GitHub at <https://github.com/gith
 dependencies:
 - base >= 4.7 && < 5
 - containers
-- deepseq
 - mtl
 - template-haskell
 - text
@@ -34,9 +33,6 @@ library:
   - -optc=-DPCRE2_CODE_UNIT_WIDTH=16
   - -optc=-Wno-discarded-qualifiers
   - -optc=-Wno-incompatible-pointer-types
-
-  - -ddump-splices
-
   extra-libraries:
   - pcre2-16
 
@@ -48,17 +44,6 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-
-    - -ddump-splices
-
-    # GHC Core
-    - -ddump-simpl
-    - -dsuppress-idinfo
-    - -dsuppress-coercions
-    - -dsuppress-type-applications
-    - -dsuppress-uniques
-    - -dsuppress-module-prefixes
-
     dependencies:
     - pcre2
 
