@@ -177,9 +177,8 @@ mkMatchTempEnv (MatchEnv {..})
         calloutStateRef <- newIORef $ CalloutState {
             calloutStateException = Nothing,
             calloutStateSubsLog   = IM.empty}
-        ctx <- do
-            ctxPtr <- ctxPtrForCallouts
-            Conc.newForeignPtr <*> pcre2_match_context_free $ ctxPtr
+        ctxPtr <- ctxPtrForCallouts
+        ctx <- Conc.newForeignPtr <*> pcre2_match_context_free $ ctxPtr
 
         -- Install C function pointers in the @pcre2_match_context@.  When
         -- dereferenced and called, they will force the user-supplied Haskell
@@ -204,8 +203,7 @@ mkMatchTempEnv (MatchEnv {..})
                             calloutStateException = Just e}
                         return pcre2_ERROR_CALLOUT
             Conc.addForeignPtrFinalizer ctx $ freeHaskellFunPtr fPtr
-            withForeignPtr ctx $ \ctxPtr ->
-                pcre2_set_callout ctxPtr fPtr nullPtr >>= check (== 0)
+            pcre2_set_callout ctxPtr fPtr nullPtr >>= check (== 0)
 
         -- Install substitution callout, if any
         forM_ matchEnvSubCallout $ \f -> do
@@ -231,9 +229,7 @@ mkMatchTempEnv (MatchEnv {..})
                             calloutStateException = Just e}
                         return (-1)
             Conc.addForeignPtrFinalizer ctx $ freeHaskellFunPtr fPtr
-            withForeignPtr ctx $ \ctxPtr -> do
-                result <- pcre2_set_substitute_callout ctxPtr fPtr nullPtr
-                check (== 0) result
+            pcre2_set_substitute_callout ctxPtr fPtr nullPtr >>= check (== 0)
 
         return $ MatchTempEnv {
             matchTempEnvCtx = Just ctx,
@@ -332,7 +328,9 @@ extractAllMatcher = extractAllSubjFun $ \code matchEnv opts ->
 type Subber = Text -> IO (CInt, Text)
 
 extractAllSubber :: Text -> Option -> Text -> IO Subber
-extractAllSubber replacement = extractAllSubjFun $ \code firstMatchEnv opts ->
+extractAllSubber replacement = extractAllSubjFun $
+    \code firstMatchEnv opts ->
+    -- Subber
     \subject ->
     withForeignPtr code $ \codePtr ->
     Text.useAsPtr subject $ \subjPtr subjCUs ->
@@ -462,7 +460,7 @@ substitute
 substitute = substituteOpt mempty
 
 substituteAll :: Text -> Text -> Text -> Text
-substituteAll = substituteOpt SubstituteGlobal
+substituteAll = substituteOpt SubGlobal
 
 -- | Given a pattern, produce an affine traversal (0 or 1 targets) that focuses
 -- from a subject to a potential non-empty list of captures.
@@ -593,7 +591,7 @@ data Option
     | Newline Newline
     | ParensNestLimit Int
     -- Compile recursion guard
-    | CompileRecursionGuard (Int -> IO Bool)
+    | UnsafeCompileRecGuard (Int -> IO Bool)
     -- Match options
     | NotBol
     | NotEol
@@ -602,8 +600,10 @@ data Option
     | PartialHard
     | PartialSoft
     -- Substitute options
-    | SubstituteGlobal
-    | SubstituteUnknownEmpty
+    | SubReplacementOnly
+    | SubGlobal
+    | SubLiteral
+    | SubUnknownEmpty
     -- Callout
     | UnsafeCallout (CalloutInfo -> IO CalloutResult)
     -- Substition callout
@@ -808,23 +808,25 @@ applyOption = \case
     ParensNestLimit limit -> unary
         CompileContextOption pcre2_set_parens_nest_limit (fromIntegral limit)
 
-    -- CompileRecursionGuardOption
-    CompileRecursionGuard f -> [CompileRecursionGuardOption f]
+    -- CompileRecGuardOption
+    UnsafeCompileRecGuard f -> [CompileRecGuardOption f]
 
     -- MatchOption
-    NotBol                 -> [MatchOption pcre2_NOTBOL]
-    NotEol                 -> [MatchOption pcre2_NOTEOL]
-    NotEmpty               -> [MatchOption pcre2_NOTEMPTY]
-    NotEmptyAtStart        -> [MatchOption pcre2_NOTEMPTY_ATSTART]
-    PartialHard            -> [MatchOption pcre2_PARTIAL_HARD]
-    PartialSoft            -> [MatchOption pcre2_PARTIAL_SOFT]
-    SubstituteGlobal       -> [MatchOption pcre2_SUBSTITUTE_GLOBAL]
-    SubstituteUnknownEmpty -> [
+    NotBol             -> [MatchOption pcre2_NOTBOL]
+    NotEol             -> [MatchOption pcre2_NOTEOL]
+    NotEmpty           -> [MatchOption pcre2_NOTEMPTY]
+    NotEmptyAtStart    -> [MatchOption pcre2_NOTEMPTY_ATSTART]
+    PartialHard        -> [MatchOption pcre2_PARTIAL_HARD]
+    PartialSoft        -> [MatchOption pcre2_PARTIAL_SOFT]
+    SubReplacementOnly -> [MatchOption pcre2_SUBSTITUTE_REPLACEMENT_ONLY]
+    SubGlobal          -> [MatchOption pcre2_SUBSTITUTE_GLOBAL]
+    SubLiteral         -> [MatchOption pcre2_SUBSTITUTE_LITERAL]
+    SubUnknownEmpty    -> [
         MatchOption pcre2_SUBSTITUTE_UNKNOWN_UNSET,
         MatchOption pcre2_SUBSTITUTE_UNSET_EMPTY]
 
     -- CalloutOption
-    UnsafeCallout f    -> [CalloutOption f]
+    UnsafeCallout f -> [CalloutOption f]
 
     -- SubCalloutOption
     UnsafeSubCallout f -> [SubCalloutOption f]
@@ -844,14 +846,14 @@ applyOption = \case
         f ctxPtr x >>= check (== 0)
 
 data AppliedOption
-    = CompileOption CUInt
-    | CompileExtraOption CUInt
-    | CompileContextOption (CompileContext -> IO ())
-    | CompileRecursionGuardOption (Int -> IO Bool)
-    | MatchOption CUInt
-    | CalloutOption (CalloutInfo -> IO CalloutResult)
-    | SubCalloutOption (SubCalloutInfo -> IO SubCalloutResult)
-    | MatchContextOption (MatchContext -> IO ())
+    = CompileOption         CUInt
+    | CompileExtraOption    CUInt
+    | CompileContextOption  (CompileContext -> IO ())
+    | CompileRecGuardOption (Int -> IO Bool)
+    | MatchOption           CUInt
+    | CalloutOption         (CalloutInfo -> IO CalloutResult)
+    | SubCalloutOption      (SubCalloutInfo -> IO SubCalloutResult)
+    | MatchContextOption    (MatchContext -> IO ())
 
 _matchOption :: Traversal' AppliedOption CUInt
 _matchOption f (MatchOption flag) = MatchOption <$> f flag
@@ -872,8 +874,8 @@ extractCompileExtraOptions opts =
 extractRecursionGuard
     :: [AppliedOption] -> (Maybe (Int -> IO Bool), [AppliedOption])
 extractRecursionGuard opts = first safeLast $ partitionEithers $ opts <&> \case
-    CompileRecursionGuardOption f -> Left f
-    opt                           -> Right opt
+    CompileRecGuardOption f -> Left f
+    opt                     -> Right opt
 
 extractCompileOptions :: [AppliedOption] -> (CUInt, [AppliedOption])
 extractCompileOptions opts =
@@ -1143,13 +1145,8 @@ neverBackslashC = getConfigNumeric pcre2_CONFIG_NEVER_BACKSLASH_C == 1
 parensLimit :: Int
 parensLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_PARENSLIMIT
 
-{- FIXME Apparently this is 10.35 only
-foreign import capi "pcre2.h value PCRE2_CONFIG_TABLES_LENGTH"
-    pcre2_CONFIG_TABLES_LENGTH :: CUInt
-
 tablesLength :: Int
 tablesLength = fromIntegral $ getConfigNumeric pcre2_CONFIG_TABLES_LENGTH
--}
 
 unicodeVersion :: Text
 unicodeVersion = fromJust $ getConfigString pcre2_CONFIG_UNICODE_VERSION

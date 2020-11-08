@@ -83,12 +83,10 @@ foreign import capi unsafe "pcre2.h" pcre2_set_bsr
 constant "BSR_ANYCRLF" ''CUInt
 constant "BSR_UNICODE" ''CUInt
 
-{- FIXME Probably not until 10.35
 foreign import capi "pcre2.h" pcre2_set_character_tables
     :: Ptr Pcre2_compile_context
     -> Ptr CUChar
     -> IO CInt
--}
 
 foreign import capi unsafe "pcre2.h" pcre2_set_compile_extra_options
     :: Ptr Pcre2_compile_context
@@ -192,7 +190,7 @@ constant "CONFIG_NEWLINE" ''CUInt
 constant "CONFIG_NEVER_BACKSLASH_C" ''CUInt
 constant "CONFIG_PARENSLIMIT" ''CUInt
 constant "CONFIG_STACKRECURSE" ''CUInt
--- constant "CONFIG_TABLES_LENGTH" ''CUInt   10.35+?
+constant "CONFIG_TABLES_LENGTH" ''CUInt
 constant "CONFIG_UNICODE_VERSION" ''CUInt
 constant "CONFIG_UNICODE" ''CUInt
 constant "CONFIG_VERSION" ''CUInt
@@ -219,11 +217,9 @@ foreign import capi safe "pcre2.h" pcre2_code_copy
     :: Ptr Pcre2_code
     -> IO (Ptr Pcre2_code)
 
-{- TODO Maybe 10.35+?
 foreign import capi "pcre2.h" pcre2_code_copy_with_tables
     :: Ptr Pcre2_code
     -> IO (Ptr Pcre2_code)
--}
 
 -- ** Main compile options
 constant "ANCHORED" ''CUInt
@@ -608,12 +604,11 @@ foreign import capi safe "pcre2.h" pcre2_substitute
     -> IO CInt
 
 -- ** Substitution options
--- TODO Commented-out options in version 10.35+?
--- constant "SUBSTITUTE_REPLACEMENT_ONLY" ''CUInt
+constant "SUBSTITUTE_REPLACEMENT_ONLY" ''CUInt
 constant "SUBSTITUTE_GLOBAL" ''CUInt
--- constant "SUBSTITUTE_MATCHED" ''CUInt
+constant "SUBSTITUTE_MATCHED" ''CUInt
 constant "SUBSTITUTE_OVERFLOW_LENGTH" ''CUInt
--- constant "SUBSTITUTE_LITERAL" ''CUInt
+constant "SUBSTITUTE_LITERAL" ''CUInt
 constant "SUBSTITUTE_UNKNOWN_UNSET" ''CUInt
 constant "SUBSTITUTE_UNSET_EMPTY" ''CUInt
 constant "SUBSTITUTE_EXTENDED" ''CUInt
