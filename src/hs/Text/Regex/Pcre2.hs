@@ -1,3 +1,114 @@
--- TODO Export functions for basic entrypoint here
+module Text.Regex.Pcre2 (
+    captures,
+    capturesOpt,
+    capturesA,
+    capturesOptA,
+    matches,
+    matchesOpt,
+    match,
+    matchOpt,
+    sub,
+    subOpt,
+    gsub,
 
-module Text.Regex.Pcre2 where
+    _captures,
+    _capturesOpt,
+
+    Captures(),
+    capture,
+    _capture,
+
+    Option(
+        Anchored,
+        AllowEmptyClass,
+        AltBsuxLegacy,
+        AltCircumflex,
+        AltVerbNames,
+        AutoCallout,
+        Caseless,
+        DollarEndOnly,
+        DotAll,
+        DupNames,
+        EndAnchored,
+        Extended,
+        ExtendedMore,
+        FirstLine,
+        Literal,
+        MatchUnsetBackRef,
+        Multiline,
+        NeverBackslashC,
+        NeverUcp,
+        NoAutoCapture,
+        NoAutoPossess,
+        NoDotStarAnchor,
+        NoStartOptimize,
+        Ucp,
+        Ungreedy,
+        UseOffsetLimit,
+        Utf,
+        -- Compile context options
+        Bsr,
+        AltBsux,
+        BadEscapeIsLiteral,
+        EscapedCrIsLf,
+        MatchLine,
+        MatchWord,
+        MaxPatternLength,
+        Newline,
+        ParensNestLimit,
+        -- Compile recursion guard
+        UnsafeCompileRecGuard,
+        -- Match options
+        NotBol,
+        NotEol,
+        NotEmpty,
+        NotEmptyAtStart,
+        PartialHard,
+        PartialSoft,
+        -- Substitute options
+        SubReplacementOnly,
+        SubGlobal,
+        SubLiteral,
+        SubUnknownEmpty,
+        -- Callout
+        UnsafeCallout,
+        -- Substition callout
+        UnsafeSubCallout,
+        -- Match context options
+        OffsetLimit,
+        HeapLimit,
+        MatchLimit,
+        DepthLimit),
+
+    Bsr(..),
+    Newline(..),
+
+    CalloutInfo(..),
+    CalloutIndex(..),
+    CalloutResult(..),
+
+    SubCalloutInfo(..),
+    SubCalloutResult(..),
+
+    SomePcre2Exception(),
+    Pcre2Exception(),
+    Pcre2CompileException(),
+
+    defaultBsr,
+    compiledWidths,
+    defaultDepthLimit,
+    defaultHeapLimit,
+    supportsJit,
+    jitTarget,
+    linkSize,
+    defaultMatchLimit,
+    defaultNewline,
+    neverBackslashC,
+    parensLimit,
+    tablesLength,
+    unicodeVersion,
+    supportsUnicode,
+    version)
+where
+
+import Text.Regex.Pcre2.Internal
