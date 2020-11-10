@@ -3,7 +3,11 @@
 
 module Text.Regex.Pcre2.TH (
     re,
-    _re)
+    _re,
+
+    Captures(),
+    capture,
+    _capture)
 where
 
 import           Control.Applicative        (Alternative(..))
@@ -30,7 +34,7 @@ memoMatcher patt = unsafePerformIO $ do
     case Map.lookup patt cache of
         Just matcher -> return matcher
         Nothing      -> do
-            let matcher = unsafePerformIO $ extractAllMatcher mempty patt
+            let matcher = unsafePerformIO $ mkCompiledMatcher mempty patt
             atomicModifyIORef' globalMatcherCache $ \cache ->
                 (Map.insert patt matcher cache, ())
             return matcher
@@ -58,10 +62,9 @@ capturesInfoQ s = do
                 promotedTupleT 2                                 -- '(,)
                     `appT` litT (strTyLit $ Text.unpack name)    -- "foo"
                     `appT` litT (numTyLit $ fromIntegral number) -- 1
-        -- '(3, '[ '("foo", 1), '("bar", 2)])
-        info = promotedTupleT 2 `appT` hi `appT` kvs
 
-    info
+    -- '(3, '[ '("foo", 1), '("bar", 2)])
+    promotedTupleT 2 `appT` hi `appT` kvs
 
 re :: QuasiQuoter
 re = QuasiQuoter {

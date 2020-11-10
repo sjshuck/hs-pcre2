@@ -1,23 +1,22 @@
 name:                pcre2
 version:             0.1.0.0
-github:              "githubuser/pcre2"
-license:             BSD3
-author:              "Author name here"
-maintainer:          "example@example.com"
-copyright:           "2020 Author name here"
+github:              "sjshuck/hs-pcre2"
+license:             Apache-2.0
+author:              "Shlomo Shuck"
+maintainer:          "stevenjshuck@gmail.com"
+copyright:           "2020 Shlomo Shuck"
 
 extra-source-files:
 - README.md
 - ChangeLog.md
 
-# Metadata used when publishing your package
-# synopsis:            Short description of your package
-# category:            Web
+synopsis:            Haskell interface to the PCRE2 C library (included)
+category:            Text
 
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is
 # common to point users to the README.md file.
-description:         Please see the README on GitHub at <https://github.com/githubuser/pcre2#readme>
+description:         Please see the README on GitHub at <https://github.com/sjshuck/hs-pcre2>
 
 dependencies:
 - base >= 4.7 && < 5

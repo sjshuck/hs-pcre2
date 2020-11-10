@@ -4,17 +4,19 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: c1d28d49bee6cfe2acef26c510b51d9d58b64ab660d2126dc22f0a20817cc958
+-- hash: 8f2015602800e6ca4d1963d285eb9159ac2c56bd87ba28eba04241001f7fd12e
 
 name:           pcre2
 version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/githubuser/pcre2#readme>
-homepage:       https://github.com/githubuser/pcre2#readme
-bug-reports:    https://github.com/githubuser/pcre2/issues
-author:         Author name here
-maintainer:     example@example.com
-copyright:      2020 Author name here
-license:        BSD3
+synopsis:       Haskell interface to the PCRE2 C library (included)
+description:    Please see the README on GitHub at <https://github.com/sjshuck/hs-pcre2>
+category:       Text
+homepage:       https://github.com/sjshuck/hs-pcre2#readme
+bug-reports:    https://github.com/sjshuck/hs-pcre2/issues
+author:         Shlomo Shuck
+maintainer:     stevenjshuck@gmail.com
+copyright:      2020 Shlomo Shuck
+license:        Apache-2.0
 license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
@@ -23,7 +25,7 @@ extra-source-files:
 
 source-repository head
   type: git
-  location: https://github.com/githubuser/pcre2
+  location: https://github.com/sjshuck/hs-pcre2
 
 library
   exposed-modules:

@@ -45,20 +45,7 @@ import qualified GHC.TypeLits               as TypeLits
 import           System.IO.Unsafe           (unsafePerformIO)
 import           Text.Regex.Pcre2.Foreign
 
--- | A register that stores data computed during callouts, such as exceptions
--- thrown, that will be inspected after @pcre2_match@ or similar completes.
-data CalloutState = CalloutState {
-    calloutStateException :: Maybe SomeException,
-    calloutStateSubsLog   :: IntMap SubCalloutResult}
-
-data CompileEnv = CompileEnv {
-    compileEnvForeignPtr :: Maybe CompileContext,
-    compileEnvERef       :: Maybe (IORef (Maybe SomeException))}
-
-data MatchEnv = MatchEnv {
-    matchEnvForeignPtr :: Maybe MatchContext,
-    matchEnvCallout    :: Maybe (CalloutInfo -> IO CalloutResult),
-    matchEnvSubCallout :: Maybe (SubCalloutInfo -> IO SubCalloutResult)}
+-- * General utilities
 
 -- | There is no @nullForeignPtr@ to pass to `withForeignPtr`, so we have to
 -- fake it with a `Maybe`.
@@ -81,15 +68,483 @@ safeLast :: [a] -> Maybe a
 safeLast [] = Nothing
 safeLast xs = Just $ last xs
 
-type ExtractOpts a = StateT [AppliedOption] IO a
+bitOr :: (Foldable t, Num a, Bits a) => t a -> a
+bitOr = foldl' (.|.) 0
 
+-- | Equivalent to @flip fix@.
+--
+-- Used to express a recursive function of one argument that is called only once
+-- on an initial value:
+--
+-- > let go x = ... in go x0
+--
+-- as:
+--
+-- > fix1 x0 $ \go x -> ...
+fix1 :: a -> ((a -> b) -> a -> b) -> b
+fix1 x f = fix f x
+
+-- | Like `fix1`, but for a function of two arguments.  Currently unused.
+fix2 :: a -> b -> ((a -> b -> c) -> a -> b -> c) -> c
+fix2 x y f = fix f x y
+
+-- | Like `fix1`, but for a function of three arguments.  Currently unused.
+fix3 :: a -> b -> c -> ((a -> b -> c -> d) -> a -> b -> c -> d) -> d
+fix3 x y z f = fix f x y z
+
+-- ** Fast @Text@ slicing
+
+data SliceRange = SliceRange
+    {-# UNPACK #-} !Text.I16
+    {-# UNPACK #-} !Text.I16
+
+-- | Zero-copy slice a 'Text'.
+thinSlice :: Text -> SliceRange -> Text
+thinSlice text (SliceRange off offEnd) = text
+    & Text.dropWord16 off
+    & Text.takeWord16 (offEnd - off)
+
+-- | Slice a 'Text', copying if it\'s less than half of the original.
+slice :: Text -> SliceRange -> Text
+slice text sliceRange =
+    let substring = thinSlice text sliceRange
+    in if Text.length substring > Text.length text `div` 2
+        then substring
+        else Text.copy substring
+
+-- | Probably unnecessary, but unrestricted 'castPtr' feels dangerous.
+class CastCUs a b | a -> b where
+    castCUs :: Ptr a -> Ptr b
+    castCUs = castPtr
+    {-# INLINE castCUs #-}
+instance CastCUs CUShort Word16
+instance CastCUs Word16 CUShort
+
+-- ** Lens types and utilities
+--
+-- $LensTypesAndUtilities
+-- The combinators\' types are excessively polymorphic\/polykinded\/ugly because
+-- they have no accompanying signatures (not worth the trouble).
+
+type Lens'      s a = forall f. (Functor f)     => (a -> f a) -> s -> f s
+type Traversal' s a = forall f. (Applicative f) => (a -> f a) -> s -> f s
+
+_headNE :: Lens' (NonEmpty a) a
+_headNE f (x :| xs) = f x <&> \x' -> x' :| xs
+
+preview l = getFirst . getConst . l (Const . First . Just)
+view l = getConst . l Const
+to k f = Const . getConst . f . k
+has l = getAny . getConst . l (\_ -> Const $ Any True)
+over l f = runIdentity . l (Identity . f)
+
+-- * Assembling inputs into @Matcher@s and @Subber@s
+
+-- | A matching function where all inputs and auxilliary data structures have
+-- been \"compiled\".  It takes a subject and produces a raw result code and
+-- match data, to be passed to further validation and inspection.
+type Matcher = Text -> IO (CInt, MatchData)
+
+-- | A substitution function.  It takes a subject and produces the number of
+-- substitutions performed (0 or 1, or more in the presence of `SubGlobal`)
+-- along with the transformed subject.  Currently the number is unused.
+type Subber = Text -> IO (CInt, Text)
+
+-- ** Options
+
+-- | A single `Monoid` type representing nearly every facility the PCRE2
+-- presents for tweaking the behavior of regex compilation and execution.
+-- 
+-- All library functions that take options have the suffix @Opt@ in their names;
+-- for each of them, there\'s also a non-@Opt@ convenience function that simply
+-- has the (unexported) `mempty` option.  For many uses, options won\'t be
+-- needed.
+--
+-- Some options can be enabled by special character sequences in the pattern as
+-- an alternative to specifying them as an `Option`.  See `Caseless` for
+-- example.
+--
+-- Documentation is scant here.  For more complete, accurate information,
+-- including discussions of corner cases arising from specific combinations of
+-- options and pattern items, please see the [C API
+-- documentation](https://pcre.org/current/doc/html/pcre2api.html).
+data Option
+    = NoOptions -- ^ `mempty`
+    | TwoOptions Option Option -- ^ `<>`
+
+    | AllowEmptyClass -- ^ Make @[]@ not match anything, rather than counting
+    -- the @]@ as the first character of the class.
+    | AltBsux -- ^ Like `AltBsuxLegacy`, except with ECMAScript 6 hex literal
+    -- feature for @\\u@.
+    | AltBsuxLegacy -- ^ Behave like ECMAScript 5 for @\\U@, @\\u@, and @\\x@.
+    -- See 'AltBsux'.
+    | AltCircumflex -- ^ Match a @^@ after a newline at the end of the subject.
+    -- Only relevant in multiline mode.
+    | AltVerbNames -- ^ Enable backslash escapes in verb names.  E.g.,
+    -- @(*MARK:L\\(O\\)L)@.
+    | Anchored -- ^ Equivalent to beginning pattern with @^@.
+    | AutoCallout -- ^ Run callout for every pattern item.  Only relevant if a
+    -- callout is set.
+    | BadEscapeIsLiteral -- ^ Do not throw an error for unrecognized or
+    -- malformed escapes.  /\"This is a dangerous option.\"/
+    | Bsr Bsr -- ^ Override what @\\R@ matches (default given by `defaultBsr`).
+    | Caseless -- ^ Case-insensitive match.  Equivalent to @(?i)@.
+    | DepthLimit Word32 -- ^ Override maximum depth of nested backtracking
+    -- (default given by `defaultDepthLimit`).  Equivalent to
+    -- @(*LIMIT_DEPTH=@/number/@)@.
+    | DollarEndOnly -- ^ Don\'t match @$@ with a newline at the end of the
+    -- subject.
+    | DotAll -- ^ A dot also matches a (single-character) newline.  Equivalent
+    -- to @(?s)@.
+    | DupNames -- ^ Allow non-unique capture names.
+    | EndAnchored -- ^ More or less like ending pattern with @$@.
+    | EscapedCrIsLf -- ^ Interpret @\\r@ as @\\n@.
+    | Extended -- ^ In the pattern, ignore whitespace, and enable comments
+    -- starting with @#@.  Equivalent to @(?x)@.
+    | ExtendedMore -- ^ Like `Extended` but also ignore spaces and tabs within
+    -- @[]@.
+    | FirstLine -- ^ The match must begin in the first line of the subject.
+    | HeapLimit Word32 -- ^ Override maximum heap memory (in kibibytes) used to
+    -- hold backtracking information (default given by `defaultHeapLimit`).
+    -- Equivalent to @(*LIMIT_HEAP=@/number/@)@.
+    | Literal -- ^ Treat the pattern as a literal string.
+    | MatchLimit Word32 -- ^ Override maximum value of the main matching loop\'s
+    -- internal counter (default given by `defaultMatchLimit`), as a simple CPU
+    -- throttle.  Equivalent to @(*LIMIT_MATCH=@/number/@)@.
+    | MatchLine -- ^ Only match complete lines.  Equivalent to bracketing the
+    -- pattern with @^(?:@pattern@)$@.
+    | MatchUnsetBackRef -- ^ A backreference to an unset capture group matches
+    -- an empty string.
+    | MatchWord -- ^ Only match subjects that have word boundaries at the
+    -- beginning and end.  Equivalent to bracketing the pattern with
+    -- @\\b(?:@/pattern/@)\\b@.
+    | MaxPatternLength Word64 -- ^ Default is `maxBound`.
+    | Multiline -- ^ @^@ and @$@ mean \"beginning\/end of a line\" rather than
+    -- \"beginning\/end of the subject\".  Equivalent to @(?m)@.
+    | NeverBackslashC -- ^ Do not allow the unsafe @\\C@ sequence.
+    | NeverUcp -- ^ Don\'t count Unicode characters in some character classes
+    -- such as @\\d@.  Overrides @(*UCP)@.
+    | Newline Newline -- ^ Override what a newline is (default given by
+    -- `defaultNewline`).  Equivalent to @(*CRLF)@ or similar.
+    | NoAutoCapture -- ^ Disable numbered capturing parentheses.
+    | NoAutoPossess -- ^ Turn off some optimizations, possibly resulting in some
+    -- callouts not being called.
+    | NoDotStarAnchor -- ^ Turn off an optimization involving @.*@, possibly
+    -- resulting in some callouts not being called.
+    | NoStartOptimize -- ^ Turn off some optimizations normally performed at the
+    -- beginning of a pattern.
+    | NotBol -- ^ First character of subject is not the __b__eginning __o__f
+    -- __l__ine.  Only affects @^@.
+    | NotEmpty -- ^ The 0th capture doesn\'t match if it would be empty.
+    | NotEmptyAtStart -- ^ The 0th capture doesn\'t match if it would be empty
+    -- and at the beginning of the subject.
+    | NotEol -- ^ End of subject is not the __e__nd __o__f __l__ine.  Only
+    -- affects @$@.
+    | OffsetLimit Word64 -- ^ Limit how far an unanchored search can advance in
+    -- the subject.
+    | ParensLimit Word32 -- ^ Override max depth of nested parentheses (default
+    -- given by `defaultParensLimit`).
+    | PartialHard -- ^ If the subject ends without finding a complete match,
+    -- stop trying alternatives and signal a partial match immediately.
+    -- Currently we do this via throwing a `Pcre2Exception` but we should do
+    -- better.
+    | PartialSoft -- ^ If the subject ends and all alternatives have been tried,
+    -- but no complete match is found, signal a partial match.  Currently we do
+    -- this via throwing a `Pcre2Exception` but we should do better.
+    | SubGlobal -- ^ /Affects `subOpt`./  Replace all, rather than just once.
+    | SubLiteral -- ^ /Affects `subOpt`./  Treat the replacement as a literal
+    -- string.
+    | SubReplacementOnly -- ^ /Affects `subOpt`./  Return just the rendered
+    -- replacement instead of it within the subject.  With `SubGlobal`, all
+    -- results are concatenated.
+    | SubUnknownEmpty -- ^ /Affects `subOpt`./  References in the replacement
+    -- to non-existent captures don\'t error but evaluate to the empty string.
+    -- This is pretty dubious by me.  You should open a ticket and ask me to
+    -- remove it.
+    | Ucp -- ^ Count Unicode characters in some character classes such as @\\d@.
+    -- Incompatible with `NeverUcp`.
+    | Ungreedy -- ^ Invert the effect of @?@&mdash;without it, quantifiers are
+    -- non-greedy; with it, they are greedy.  Equivalent to @(?U)@.
+    | UnsafeCallout (CalloutInfo -> IO CalloutResult) -- ^ Run the given callout
+    -- on every capture.  Multiples of this option before the rightmost are
+    -- ignored.
+    --
+    -- /NOTE: The callout is run via `unsafePerformIO` within pure code!/
+    | UnsafeCompileRecGuard (Int -> IO Bool) -- ^ Run the given guard on every
+    -- new descent into a level of parentheses, passing the current depth as
+    -- argument.  Returning @False@ aborts pattern compilation with an
+    -- exception.  Multiples of this option before the rightmost are ignored.
+    --
+    -- /NOTE: The guard is run via `unsafePerformIO` within pure code!/
+    | UnsafeSubCallout (SubCalloutInfo -> IO SubCalloutResult) -- ^ Run the
+    -- given callout on every substitution.  This is at most once unless
+    -- `SubGlobal` is set.  Multiples of this option before the rightmost are
+    -- ignored.
+    --
+    -- /NOTE: The callout is run via `unsafePerformIO` within pure code!/
+    | Utf -- ^ Treat both the pattern and subject as UTF rather than fixed-width
+    -- 16-bit code units.
+
+instance Semigroup Option where
+    (<>) = TwoOptions
+
+instance Monoid Option where
+    mempty = NoOptions
+
+-- | What @\\R@, __b__ack__s__lash __R__, can mean.
+data Bsr
+    = BsrAnyCrlf -- ^ @\\r@, @\\n@, or @\\r\\n@
+    | BsrUnicode -- ^ any Unicode line ending sequence
+    deriving (Eq, Show)
+
+-- | C to Haskell.
+bsrFromC :: CUInt -> Bsr
+bsrFromC x
+    | x == pcre2_BSR_UNICODE = BsrUnicode
+    | x == pcre2_BSR_ANYCRLF = BsrAnyCrlf
+    | otherwise              = error $ "bsrFromC: bad value " ++ show x
+
+-- | Haskell to C.
+bsrToC :: Bsr -> CUInt
+bsrToC BsrUnicode = pcre2_BSR_UNICODE
+bsrToC BsrAnyCrlf = pcre2_BSR_ANYCRLF
+
+-- | What\'s considered a newline.
+data Newline
+    = NewlineCr -- ^ @\\r@ only
+    | NewlineLf -- ^ @\\n@ only
+    | NewlineCrlf -- ^ @\\r\\n@ only
+    | NewlineAny -- ^ any Unicode line ending sequence
+    | NewlineAnyCrlf -- ^ any of the above
+    | NewlineNul -- ^ the NUL character, that is a binary zero
+    deriving (Eq, Show)
+
+-- | C to Haskell.
+newlineFromC :: CUInt -> Newline
+newlineFromC x
+    | x == pcre2_NEWLINE_CR      = NewlineCr
+    | x == pcre2_NEWLINE_LF      = NewlineLf
+    | x == pcre2_NEWLINE_CRLF    = NewlineCrlf
+    | x == pcre2_NEWLINE_ANY     = NewlineAny
+    | x == pcre2_NEWLINE_ANYCRLF = NewlineAnyCrlf
+    | x == pcre2_NEWLINE_NUL     = NewlineNul
+    | otherwise                  = error $ "newlineFromC: bad value " ++ show x
+
+-- | Haskell to C.
+newlineToC :: Newline -> CUInt
+newlineToC NewlineCr      = pcre2_NEWLINE_CR
+newlineToC NewlineLf      = pcre2_NEWLINE_LF
+newlineToC NewlineCrlf    = pcre2_NEWLINE_CRLF
+newlineToC NewlineAny     = pcre2_NEWLINE_ANY
+newlineToC NewlineAnyCrlf = pcre2_NEWLINE_ANYCRLF
+newlineToC NewlineNul     = pcre2_NEWLINE_NUL
+
+-- | Input for user-defined substitution callouts.
+data SubCalloutInfo
+    = SubCalloutInfo {
+        -- | The 1-based index of which substitution we\'re on.  Only goes past
+        -- 1 during global substitutions.
+        subCalloutSubsCount :: Int,
+        -- | The captures that have been set so far.
+        subCalloutCaptures :: NonEmpty (Maybe Text),
+        -- | The original subject.
+        subCalloutSubject :: Text,
+        -- | The replacement.
+        subCalloutReplacement :: Text}
+    deriving (Show, Eq)
+
+-- | Input for user-defined callouts.
+data CalloutInfo
+    = CalloutInfo {
+        -- | The index of which capture we\'re on.  Note that the callout is
+        -- never run for the 0th capture.
+        calloutIndex :: CalloutIndex,
+        -- | The captures that have been set so far.
+        calloutCaptures :: NonEmpty (Maybe Text),
+        -- | The original subject.
+        calloutSubject :: Text,
+        -- | The name of the most recently passed @(*MARK)@, @(*PRUNE)@, or
+        -- @(*THEN)@, if any.
+        calloutMark :: Maybe Text,
+        -- | Is this the first callout after the start of matching?
+        calloutIsFirst :: Bool,
+        -- | Has a backtrack occurred since the previous callout, or the
+        -- beginning of matching if no previous callouts?
+        calloutBacktracked :: Bool}
+    deriving (Show, Eq)
+
+-- | Info supplied to callout functions.
+data CalloutIndex
+    = CalloutNumber Int -- ^ numbered and not 255 (auto-callout)
+    | CalloutName Text -- ^ named
+    | CalloutPatternPos Int Int -- ^ auto-callout&mdash;half-open offset range
+    -- within the subject
+    deriving (Show, Eq)
+
+-- | Callout functions return one of these values, which dictates what happens
+-- next in the match.
+data CalloutResult
+    = CalloutProceed -- ^ Keep going.
+    | CalloutNoMatchHere -- ^ Fail the current capture, but not the whole match.
+    -- For example, backtracking may occur.
+    | CalloutNoMatch -- ^ Fail the whole match.
+    deriving (Show, Eq)
+
+-- | Substitution callout functions return one of these values, which dictates
+-- what happens next in the substitution.
+data SubCalloutResult
+    = SubCalloutAccept -- ^ Succeed, and keep going if in global mode.
+    | SubCalloutSkip -- ^ Do not perform this substitution, but keep going if
+    -- in global mode.
+    | SubCalloutAbort -- ^ Do not perform this or any subsequent substitutions.
+    deriving (Show, Eq)
+
+-- ** Lower-level representation of options and C data
+
+type CompileContext = ForeignPtr Pcre2_compile_context
+type Code           = ForeignPtr Pcre2_code
+type MatchContext   = ForeignPtr Pcre2_match_context
+type MatchData      = ForeignPtr Pcre2_match_data
+
+-- | An `Option` can result in multiple \"plans\".
+applyOption :: Option -> [AppliedOption]
+applyOption = \case
+    NoOptions            -> []
+    TwoOptions opt0 opt1 -> applyOption opt0 ++ applyOption opt1
+
+    -- CompileOption
+    Anchored          -> [CompileOption pcre2_ANCHORED]
+    AllowEmptyClass   -> [CompileOption pcre2_ALLOW_EMPTY_CLASS]
+    AltBsuxLegacy     -> [CompileOption pcre2_ALT_BSUX]
+    AltCircumflex     -> [CompileOption pcre2_ALT_CIRCUMFLEX]
+    AltVerbNames      -> [CompileOption pcre2_ALT_VERBNAMES]
+    AutoCallout       -> [CompileOption pcre2_AUTO_CALLOUT]
+    Caseless          -> [CompileOption pcre2_CASELESS]
+    DollarEndOnly     -> [CompileOption pcre2_DOLLAR_ENDONLY]
+    DotAll            -> [CompileOption pcre2_DOTALL]
+    DupNames          -> [CompileOption pcre2_DUPNAMES]
+    EndAnchored       -> [CompileOption pcre2_ENDANCHORED]
+    Extended          -> [CompileOption pcre2_EXTENDED]
+    ExtendedMore      -> [CompileOption pcre2_EXTENDED_MORE]
+    FirstLine         -> [CompileOption pcre2_FIRSTLINE]
+    Literal           -> [CompileOption pcre2_LITERAL]
+    MatchUnsetBackRef -> [CompileOption pcre2_MATCH_UNSET_BACKREF]
+    Multiline         -> [CompileOption pcre2_MULTILINE]
+    NeverBackslashC   -> [CompileOption pcre2_NEVER_BACKSLASH_C]
+    NeverUcp          -> [CompileOption pcre2_NEVER_UCP]
+    NoAutoCapture     -> [CompileOption pcre2_NO_AUTO_CAPTURE]
+    NoAutoPossess     -> [CompileOption pcre2_NO_AUTO_POSSESS]
+    NoDotStarAnchor   -> [CompileOption pcre2_NO_DOTSTAR_ANCHOR]
+    NoStartOptimize   -> [CompileOption pcre2_NO_START_OPTIMIZE]
+    Ucp               -> [CompileOption pcre2_UCP]
+    Ungreedy          -> [CompileOption pcre2_UNGREEDY]
+    Utf               -> [CompileOption pcre2_UTF]
+
+    -- ExtraCompileOption
+    AltBsux            -> [CompileExtraOption pcre2_EXTRA_ALT_BSUX]
+    BadEscapeIsLiteral -> [CompileExtraOption pcre2_EXTRA_BAD_ESCAPE_IS_LITERAL]
+    EscapedCrIsLf      -> [CompileExtraOption pcre2_EXTRA_ESCAPED_CR_IS_LF]
+    MatchLine          -> [CompileExtraOption pcre2_EXTRA_MATCH_LINE]
+    MatchWord          -> [CompileExtraOption pcre2_EXTRA_MATCH_WORD]
+
+    -- CompileContextOption
+    Bsr bsr -> unary
+        CompileContextOption pcre2_set_bsr (bsrToC bsr)
+    MaxPatternLength len -> unary
+        CompileContextOption pcre2_set_max_pattern_length (fromIntegral len)
+    Newline newline -> unary
+        CompileContextOption pcre2_set_newline (newlineToC newline)
+    ParensLimit limit -> unary
+        CompileContextOption pcre2_set_parens_nest_limit (fromIntegral limit)
+
+    -- CompileRecGuardOption
+    UnsafeCompileRecGuard f -> [CompileRecGuardOption f]
+
+    -- MatchOption
+    NotBol             -> [MatchOption pcre2_NOTBOL]
+    NotEol             -> [MatchOption pcre2_NOTEOL]
+    NotEmpty           -> [MatchOption pcre2_NOTEMPTY]
+    NotEmptyAtStart    -> [MatchOption pcre2_NOTEMPTY_ATSTART]
+    PartialHard        -> [MatchOption pcre2_PARTIAL_HARD]
+    PartialSoft        -> [MatchOption pcre2_PARTIAL_SOFT]
+    SubReplacementOnly -> [MatchOption pcre2_SUBSTITUTE_REPLACEMENT_ONLY]
+    SubGlobal          -> [MatchOption pcre2_SUBSTITUTE_GLOBAL]
+    SubLiteral         -> [MatchOption pcre2_SUBSTITUTE_LITERAL]
+    SubUnknownEmpty    -> [
+        MatchOption pcre2_SUBSTITUTE_UNKNOWN_UNSET,
+        MatchOption pcre2_SUBSTITUTE_UNSET_EMPTY]
+
+    -- CalloutOption
+    UnsafeCallout f -> [CalloutOption f]
+
+    -- SubCalloutOption
+    UnsafeSubCallout f -> [SubCalloutOption f]
+
+    -- MatchContextOption
+    OffsetLimit limit -> CompileOption pcre2_USE_OFFSET_LIMIT : unary
+        MatchContextOption pcre2_set_offset_limit (fromIntegral limit)
+    HeapLimit limit -> unary
+        MatchContextOption pcre2_set_heap_limit (fromIntegral limit)
+    MatchLimit limit -> unary
+        MatchContextOption pcre2_set_match_limit (fromIntegral limit)
+    DepthLimit limit -> unary
+        MatchContextOption pcre2_set_depth_limit (fromIntegral limit)
+
+    where
+    unary ctor f x = (: []) $ ctor $ \ctx -> withForeignPtr ctx $ \ctxPtr ->
+        f ctxPtr x >>= check (== 0)
+
+-- | Intermediate representation of options expressing what effect they\'ll have
+-- on which stage of regex compilation\/execution.  Also provide fake @Prism'@s.
+data AppliedOption
+    = CompileOption CUInt
+    | CompileExtraOption CUInt
+    | CompileContextOption (CompileContext -> IO ())
+    | CompileRecGuardOption (Int -> IO Bool)
+    | MatchOption CUInt
+    | CalloutOption (CalloutInfo -> IO CalloutResult)
+    | SubCalloutOption (SubCalloutInfo -> IO SubCalloutResult)
+    | MatchContextOption (MatchContext -> IO ())
+
+_CompileOption f =
+    \case CompileOption x -> CompileOption <$> f x; o -> pure o
+_CompileExtraOption f =
+    \case CompileExtraOption x -> CompileExtraOption <$> f x; o -> pure o
+_CompileContextOption f =
+    \case CompileContextOption x -> CompileContextOption <$> f x; o -> pure o
+_CompileRecGuardOption f =
+    \case CompileRecGuardOption x -> CompileRecGuardOption <$> f x; o -> pure o
+_MatchOption f =
+    \case MatchOption x -> MatchOption <$> f x; o -> pure o
+_CalloutOption f =
+    \case CalloutOption x -> CalloutOption <$> f x; o -> pure o
+_SubCalloutOption f =
+    \case SubCalloutOption x -> SubCalloutOption <$> f x; o -> pure o
+_MatchContextOption f =
+    \case MatchContextOption x -> MatchContextOption <$> f x; o -> pure o
+
+-- ** Extracting options at the right times
+--
+-- $ExtractingOptionsAtTheRightTimes
+-- We interleave the extraction of options with the manipulation of foreign data
+-- en route to the target `Matcher` or `Subber`.
+
+-- | A `Monad` modeling both option extraction and foreign effects.
+type ExtractOpts = StateT [AppliedOption] IO
+
+-- | Use a fake @Prism'@ to extract a category of options.
+extractOptsOf :: Traversal' AppliedOption a -> ExtractOpts [a]
+extractOptsOf traversal = state $ partitionEithers . map discrim where
+    discrim opt = maybe (Right opt) Left $ preview traversal opt
+
+-- | Prepare to compile a `Code`.
 extractCompileEnv :: ExtractOpts CompileEnv
 extractCompileEnv = do
-    ctxUpds <- extractCompileContextUpdates
-    xtraOpts <- extractCompileExtraOptions
-    recGuard <- extractRecursionGuard
+    ctxUpds <- extractOptsOf _CompileContextOption
+    xtraOpts <- bitOr <$> extractOptsOf _CompileExtraOption
+    recGuard <- safeLast <$> extractOptsOf _CompileRecGuardOption
 
-    compileEnvForeignPtr <- sequence $ do
+    compileEnvCtx <- sequence $ do
         guard $ not $ null ctxUpds && xtraOpts == 0 && null recGuard
         Just $ liftIO $ do
             ctx <- mkForeignPtr pcre2_compile_context_free $
@@ -102,7 +557,7 @@ extractCompileEnv = do
             return ctx
 
     compileEnvERef <- sequence $ do
-        ctx <- compileEnvForeignPtr
+        ctx <- compileEnvCtx
         f <- recGuard
         Just $ liftIO $ do
             eRef <- newIORef Nothing
@@ -123,15 +578,23 @@ extractCompileEnv = do
 
     return $ CompileEnv {..}
 
+-- | Inputs to `Code` compilation besides the pattern.
+data CompileEnv = CompileEnv {
+    compileEnvCtx :: Maybe CompileContext,
+    -- | A register for catching exceptions thrown in recursion guards, if
+    -- needed.
+    compileEnvERef :: Maybe (IORef (Maybe SomeException))}
+
+-- | Compile a `Code`.
 extractCode :: Text -> CompileEnv -> ExtractOpts Code
 extractCode patt (CompileEnv {..}) = do
-    opts <- extractCompileOptions
+    opts <- bitOr <$> extractOptsOf _CompileOption
 
     liftIO $ mkForeignPtr pcre2_code_free $
         Text.useAsPtr patt $ \pattPtr pattCUs ->
         alloca $ \errorCodePtr ->
         alloca $ \errorOffPtr ->
-        withForeignOrNullPtr compileEnvForeignPtr $ \ctxPtr -> do
+        withForeignOrNullPtr compileEnvCtx $ \ctxPtr -> do
             codePtr <- pcre2_compile
                 (castCUs pattPtr)
                 (fromIntegral pattCUs)
@@ -149,10 +612,19 @@ extractCode patt (CompileEnv {..}) = do
 
             return codePtr
 
+-- | Post-`Code` compilation data used in preparation for a match or
+-- substitution.  This remains constant for the lifetime of a `Matcher` or
+-- `Subber`.
+data MatchEnv = MatchEnv {
+    matchEnvCtx        :: Maybe MatchContext,
+    matchEnvCallout    :: Maybe (CalloutInfo -> IO CalloutResult),
+    matchEnvSubCallout :: Maybe (SubCalloutInfo -> IO SubCalloutResult)}
+
+-- | Prepare a matching function.
 extractMatchEnv :: ExtractOpts MatchEnv
 extractMatchEnv = do
-    ctxUpds <- extractMatchContextUpdates
-    matchEnvForeignPtr <- if null ctxUpds
+    ctxUpds <- extractOptsOf _MatchContextOption
+    matchEnvCtx <- if null ctxUpds
         then return Nothing
         else liftIO $ Just <$> do
             ctx <- mkForeignPtr pcre2_match_context_free $
@@ -162,138 +634,19 @@ extractMatchEnv = do
 
             return ctx
 
-    matchEnvCallout <- extractCallout
-    matchEnvSubCallout <- extractSubCallout
+    matchEnvCallout <- safeLast <$> extractOptsOf _CalloutOption
+    matchEnvSubCallout <- safeLast <$> extractOptsOf _SubCalloutOption
 
     return $ MatchEnv {..}
 
-data MatchTempEnv = MatchTempEnv {
-    matchTempEnvCtx :: Maybe MatchContext,
-    matchTempEnvRef :: Maybe (IORef CalloutState)}
-
--- | Temporarily present a @pcre2_match_context@ for @pcre2_match()@ (or
--- @pcre2_substitute()@) to use.  Depending on various options, resource
--- allocation and deallocation may be required.  For user-defined callouts, the
--- subject itself is required to be available as info.
-mkMatchTempEnv :: MatchEnv -> Text -> IO MatchTempEnv
-mkMatchTempEnv (MatchEnv {..})
-    | null matchEnvCallout && null matchEnvSubCallout = \_ -> return noCallouts
-    | otherwise = \subject -> do
-        -- Callouts.  To save and inspect state that occurs in callouts
-        -- during potentially concurrent matches, we need to create a new state
-        -- ref for each match.  This means a new FunPtr to close on it, and that
-        -- means a new match context to set it to.
-        calloutStateRef <- newIORef $ CalloutState {
-            calloutStateException = Nothing,
-            calloutStateSubsLog   = IM.empty}
-        ctx <- mkForeignPtr pcre2_match_context_free ctxPtrForCallouts
-
-        -- Install C function pointers in the @pcre2_match_context@.  When
-        -- dereferenced and called, they will force the user-supplied Haskell
-        -- callout functions and their results, catching any exceptions and
-        -- saving them.
-
-        -- Install callout, if any
-        forM_ matchEnvCallout $ \f -> do
-            fPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
-                info <- getCalloutInfo subject blockPtr
-                resultOrE <- try $ do
-                    f <- evaluate f
-                    result <- f info
-                    evaluate result
-                case resultOrE of
-                    Right result -> return $ case result of
-                        CalloutProceed     -> 0
-                        CalloutNoMatchHere -> 1
-                        CalloutNoMatch     -> pcre2_ERROR_NOMATCH
-                    Left e -> do
-                        modifyIORef' calloutStateRef $ \cst -> cst {
-                            calloutStateException = Just e}
-                        return pcre2_ERROR_CALLOUT
-            withForeignPtr ctx $ \ctxPtr ->
-                pcre2_set_callout ctxPtr fPtr nullPtr >>= check (== 0)
-
-        -- Install substitution callout, if any
-        forM_ matchEnvSubCallout $ \f -> do
-            fPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
-                info <- getSubCalloutInfo subject blockPtr
-                resultOrE <- try $ do
-                    f <- evaluate f
-                    result <- f info
-                    evaluate result
-                case resultOrE of
-                    Right result -> do
-                        modifyIORef' calloutStateRef $ \cst -> cst {
-                            calloutStateSubsLog = IM.insert
-                                (subCalloutSubsCount info)
-                                result
-                                (calloutStateSubsLog cst)}
-                        return $ case result of
-                            SubCalloutAccept ->  0
-                            SubCalloutSkip   ->  1
-                            SubCalloutAbort  -> -1
-                    Left e -> do
-                        modifyIORef' calloutStateRef $ \cst -> cst {
-                            calloutStateException = Just e}
-                        return (-1)
-            withForeignPtr ctx $ \ctxPtr -> do
-                result <- pcre2_set_substitute_callout ctxPtr fPtr nullPtr
-                check (== 0) result
-
-        return $ MatchTempEnv {
-            matchTempEnvCtx = Just ctx,
-            matchTempEnvRef = Just calloutStateRef}
-
-    where
-    noCallouts = MatchTempEnv {
-        matchTempEnvCtx = matchEnvForeignPtr,
-        matchTempEnvRef = Nothing}
-    ctxPtrForCallouts = case matchEnvForeignPtr of
-        -- No pre-existing match context, so create one afresh.
-        Nothing -> pcre2_match_context_create nullPtr
-        -- Pre-existing match context, so copy it.
-        Just ctx -> withForeignPtr ctx pcre2_match_context_copy
-
-maybeRethrow :: Maybe (IORef CalloutState) -> IO ()
-maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
-
-data SliceRange = SliceRange
-    {-# UNPACK #-} !Text.I16
-    {-# UNPACK #-} !Text.I16
-
--- | Does not check if indexes go out of bounds of the ovector.
-getOvecEntriesAt :: NonEmpty Int -> MatchData -> IO (NonEmpty SliceRange)
-getOvecEntriesAt ns matchData = withForeignPtr matchData $ \matchDataPtr -> do
-    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
-
-    let peekOvec :: Int -> IO Text.I16
-        peekOvec = fmap fromIntegral . peekElemOff ovecPtr
-
-    forM ns $ \n -> liftM2 SliceRange
-        (peekOvec $ n * 2)
-        (peekOvec $ n * 2 + 1)
-
-thinSlice :: Text -> SliceRange -> Text
-thinSlice text (SliceRange off offEnd) = text
-    & Text.dropWord16 off
-    & Text.takeWord16 (offEnd - off)
-
--- | Also defines heuristic by which substrings are copied or not.
-slice :: Text -> SliceRange -> Text
-slice text sliceRange
-    | Text.length substring > Text.length text `div` 2 = substring
-    | otherwise                                        = Text.copy substring
-    where
-    substring = thinSlice text sliceRange
-
--- | Helper for @extractAll*@ functions.  Basically, extract all options and
--- produce a function that takes a `Text` subject and does something.
-extractAllSubjFun
+-- | Helper for @mkCompiled*@ functions.  Basically, extract all options and
+-- help produce a function that takes a `Text` subject and does something.
+mkCompiledSubjFun
     :: (Code -> MatchEnv -> CUInt -> Text -> IO a)
     -> Option
     -> Text
     -> IO (Text -> IO a)
-extractAllSubjFun mkSubjFun option patt =
+mkCompiledSubjFun mkSubjFun option patt =
     runStateT extractAll (applyOption option) <&> \case
         (subjFun, []) -> subjFun
         _             -> error "BUG! Options not fully extracted"
@@ -303,18 +656,16 @@ extractAllSubjFun mkSubjFun option patt =
         compileEnv <- extractCompileEnv
         code <- extractCode patt compileEnv
         matchEnv <- extractMatchEnv
-        matchOpts <- extractMatchOptions
+        matchOpts <- bitOr <$> extractOptsOf _MatchOption
 
         return $ mkSubjFun code matchEnv matchOpts
 
--- | The most general form of a matching function, where all information and
--- auxilliary data structures have been \"compiled\".  It takes a subject and
--- produces a raw result code and match data, to be passed to further validation
--- and inspection.
-type Matcher = Text -> IO (CInt, MatchData)
-
-extractAllMatcher :: Option -> Text -> IO Matcher
-extractAllMatcher = extractAllSubjFun $ \code matchEnv opts ->
+-- | Produce a `Matcher`.
+mkCompiledMatcher
+    :: Option
+    -> Text -- ^ pattern
+    -> IO Matcher
+mkCompiledMatcher = mkCompiledSubjFun $ \code matchEnv opts ->
     let matchTempEnvWithSubj = mkMatchTempEnv matchEnv
     in \subject -> withForeignPtr code $ \codePtr -> do
         matchData <- mkForeignPtr pcre2_match_data_free $
@@ -336,11 +687,27 @@ extractAllMatcher = extractAllSubjFun $ \code matchEnv opts ->
 
         return (result, matchData)
 
-type Subber = Text -> IO (CInt, Text)
-
-extractAllSubber :: Text -> Option -> Text -> IO Subber
-extractAllSubber replacement =
-    extractAllSubjFun $ \code firstMatchEnv opts ->
+-- | A `Subber` works by first writing results to a reasonably-sized buffer.  If
+-- we run out of room, PCRE2 allows us to simulate the rest of the substitution
+-- without writing anything, in order to calculate how big the buffer actually
+-- has to be.  In this event, we rerun the substitution with a new,
+-- exactly-sized buffer.
+--
+-- One potential issue arising from two attempts is running effectful callouts
+-- twice.  We mitigate this by skipping callouts the second time:
+--   * all capture callouts, since they had run during the simulation; and
+--   * those substitution callouts that had run the first time.
+--
+-- Therefore, the first time, log the substitution callout indexes that had run
+-- along with their results, and replay the log the second time, returning those
+-- same results without re-incurring effects.
+mkCompiledSubber
+    :: Text      -- ^ replacement
+    -> Option
+    -> Text      -- ^ pattern
+    -> IO Subber
+mkCompiledSubber replacement =
+    mkCompiledSubjFun $ \code firstMatchEnv opts ->
     -- Subber
     \subject ->
     withForeignPtr code $ \codePtr ->
@@ -406,269 +773,113 @@ extractAllSubber replacement =
                         maybeRethrow matchTempEnvRef
                         checkAndGetOutput result outBufPtr
 
--- | Helper to create non-Template Haskell API functions.  They all take options
--- and a pattern, and then do something via a 'Matcher'.
-withMatcher :: (Matcher -> a) -> Option -> Text -> a
-withMatcher f option patt = f $ unsafePerformIO $ extractAllMatcher option patt
-
--- | Match a pattern to a subject and return a list of captures, or @[]@ if no
--- match.
-captures :: Text -> Text -> [Text]
-captures = capturesOpt mempty
-
--- | @captures = capturesOpt mempty@
-capturesOpt :: Option -> Text -> Text -> [Text]
-capturesOpt option patt = view $ _capturesOpt option patt . to NE.toList
-
--- | Match a pattern to a subject and return a non-empty list of captures in an
--- `Alternative`, or `empty` if no match.  Typically the @Alternative@ instance
--- will be `Maybe`, but other useful ones exist, notably those of `STM` and of
--- the various parser combinator libraries.
+-- | Generate per-call data for @pcre2_match()@ etc., to accommodate callouts.
 --
--- Note that PCRE2 errors are distinct from match failures and are not
--- represented as `empty`; they are thrown purely as `Pcre2Exception`s.
--- Returning @IO (NonEmpty Text)@ from this function will not enable you to
--- catch them; you must
---
--- > let parseDate = capturesA "(\\d{4})-(\\d{2})-(\\d{2})"
--- > in case parseDate "submitted 2020-10-20" of
--- >     Just (date :| [y, m, d]) -> ...
--- >     Nothing                  -> putStrLn "didn't match"
-capturesA :: (Alternative f) => Text -> Text -> f (NonEmpty Text)
-capturesA = capturesOptA mempty
+-- We need to save and inspect state that occurs in potentially concurrent
+-- matches.  This means a new state ref for each match, which means a new
+-- `FunPtr` to close on it, which means a new match context to set it to.
+mkMatchTempEnv
+    :: MatchEnv
+    -> Text -- ^ Callout info requires access to the original subject.
+    -> IO MatchTempEnv
+mkMatchTempEnv (MatchEnv {..})
+    | null matchEnvCallout && null matchEnvSubCallout = \_ -> return noCallouts
+    | otherwise                                       = \subject -> do
+        calloutStateRef <- newIORef $ CalloutState {
+            calloutStateException = Nothing,
+            calloutStateSubsLog   = IM.empty}
+        ctx <- mkForeignPtr pcre2_match_context_free ctxPtrForCallouts
 
--- | @capturesA = capturesOptA mempty@
-capturesOptA :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
-capturesOptA option patt = maybe empty pure . preview (_capturesOpt option patt)
+        -- Install C function pointers in the @pcre2_match_context@.  When
+        -- dereferenced and called, they will force the user-supplied Haskell
+        -- callout functions and their results, catching any exceptions and
+        -- saving them.
 
--- | Does the pattern match the subject?
-matches :: Text -> Text -> Bool
-matches = matchesOpt mempty
+        -- Install callout, if any
+        forM_ matchEnvCallout $ \f -> do
+            fPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
+                info <- getCalloutInfo subject blockPtr
+                resultOrE <- try $ do
+                    f <- evaluate f
+                    result <- f info
+                    evaluate result
+                case resultOrE of
+                    Right result -> return $ case result of
+                        CalloutProceed     -> 0
+                        CalloutNoMatchHere -> 1
+                        CalloutNoMatch     -> pcre2_ERROR_NOMATCH
+                    Left e -> do
+                        modifyIORef' calloutStateRef $ \cst -> cst {
+                            calloutStateException = Just e}
+                        return pcre2_ERROR_CALLOUT
+            withForeignPtr ctx $ \ctxPtr ->
+                pcre2_set_callout ctxPtr fPtr nullPtr >>= check (== 0)
 
--- | @matches = matchesOpt mempty@
-matchesOpt :: Option -> Text -> Text -> Bool
-matchesOpt option patt = has $ _capturesOpt option patt
+        -- Install substitution callout, if any
+        forM_ matchEnvSubCallout $ \f -> do
+            fPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
+                info <- getSubCalloutInfo subject blockPtr
+                resultOrE <- try $ do
+                    f <- evaluate f
+                    result <- f info
+                    evaluate result
+                case resultOrE of
+                    Right result -> do
+                        modifyIORef' calloutStateRef $ \cst -> cst {
+                            calloutStateSubsLog = IM.insert
+                                (subCalloutSubsCount info)
+                                result
+                                (calloutStateSubsLog cst)}
+                        return $ case result of
+                            SubCalloutAccept ->  0
+                            SubCalloutSkip   ->  1
+                            SubCalloutAbort  -> -1
+                    Left e -> do
+                        modifyIORef' calloutStateRef $ \cst -> cst {
+                            calloutStateException = Just e}
+                        return (-1)
+            withForeignPtr ctx $ \ctxPtr -> do
+                result <- pcre2_set_substitute_callout ctxPtr fPtr nullPtr
+                check (== 0) result
 
--- | Match a pattern to a subject and return only the portion that matched, i.e.
--- the 0th capture.
-match :: (Alternative f) => Text -> Text -> f Text
-match = matchOpt mempty
+        return $ MatchTempEnv {
+            matchTempEnvCtx = Just ctx,
+            matchTempEnvRef = Just calloutStateRef}
 
-matchOpt :: (Alternative f) => Option -> Text -> Text -> f Text
-matchOpt = withMatcher $ \matcher ->
-    let _match = _capturesInternal matcher (Just $ 0 :| []) . _headNE
-    in maybe empty pure . preview _match
+    where
+    noCallouts = MatchTempEnv {
+        matchTempEnvCtx = matchEnvCtx,
+        matchTempEnvRef = Nothing}
+    ctxPtrForCallouts = case matchEnvCtx of
+        -- No pre-existing match context, so create one afresh.
+        Nothing -> pcre2_match_context_create nullPtr
+        -- Pre-existing match context, so copy it.
+        Just ctx -> withForeignPtr ctx pcre2_match_context_copy
 
-sub
-    :: Text -- ^ pattern
-    -> Text -- ^ replacement
-    -> Text -- ^ subject
-    -> Text -- ^ result
-sub = subOpt mempty
+-- | Per-call data for @pcre2_match()@ etc.
+data MatchTempEnv = MatchTempEnv {
+    matchTempEnvCtx :: Maybe MatchContext,
+    matchTempEnvRef :: Maybe (IORef CalloutState)}
 
-gsub :: Text -> Text -> Text -> Text
-gsub = subOpt SubGlobal
+-- | Data computed during callouts that will be stashed in an IORef and
+-- inspected after @pcre2_match()@ or similar completes.
+data CalloutState = CalloutState {
+    calloutStateException :: Maybe SomeException,
+    calloutStateSubsLog   :: IntMap SubCalloutResult}
 
-subOpt :: Option -> Text -> Text -> Text -> Text
-subOpt option patt replacement = snd . unsafePerformIO . subber where
-    subber = unsafePerformIO $ extractAllSubber replacement option patt
-
--- | Given a pattern, produce an affine traversal (0 or 1 targets) that focuses
--- from a subject to a potential non-empty list of captures.
---
--- Substitution works in the following way:  If a capture is set such that the
--- new `Text` is not equal to the old one, a substitution occurs, otherwise it
--- doesn\'t.  This matters in cases where a capture encloses another
--- capture&mdash;notably, _all_ parenthesized captures are enclosed by the 0th
--- capture, the region of the subject matched by the whole pattern.
---
--- > let threeAndMiddle = _captures ". (.) ."
--- > print $ set threeAndMiddle ("A A A" :| ["B"]) "A A A" -- "A B A"
--- > print $ set threeAndMiddle ("A B A" :| ["A"]) "A A A" -- "A B A"
---
--- Changing multiple overlapping captures is unsupported and won\'t do what you
--- want.
---
--- If the list becomes longer for some reason, the extra elements are ignored;
--- if it\'s shortened, the absent elements are considered to be unchanged.
---
--- It's recommended that the list be modified capture-wise, using @ix@.
---
--- > let madlibs = _captures "(\\w+) my (\\w+)"
--- >
--- > print $ "Well bust my buttons!" &~ do
--- >     zoom madlibs $ do
--- >         ix 1 . _head .= 'd'
--- >         ix 2 %= Text.reverse
--- >     _last .= '?'
--- >
--- > -- "Well dust my snottub?"
-_captures :: Text -> Traversal' Text (NonEmpty Text)
-_captures = _capturesOpt mempty
-
-_capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
-_capturesOpt = withMatcher $ \matcher -> _capturesInternal matcher Nothing
-
-predictCaptureNames :: Option -> Text -> IO [Maybe Text]
-predictCaptureNames option patt = do
-    code <- evalStateT
-        (extractCompileEnv >>= extractCode patt)
-        (applyOption option)
-
-    withForeignPtr code getCaptureNames
-
------------------ From Compile.hs ----------------------------------------------
-
--- | NOTE: The 0th capture is always named Nothing.
-getCaptureNames :: Ptr Pcre2_code -> IO [Maybe Text]
-getCaptureNames codePtr = do
-    nameCount <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMECOUNT
-    nameEntrySize <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMEENTRYSIZE
-    nameTable <- getCodeInfo @PCRE2_SPTR codePtr pcre2_INFO_NAMETABLE
-
-    -- Can't do [0 .. nameCount - 1] because it underflows when nameCount == 0
-    let indexes = takeWhile (< nameCount) [0 ..]
-    names <- fmap IM.fromList $ forM indexes $ \i -> do
-        let entryPtr = nameTable `advancePtr` fromIntegral (i * nameEntrySize)
-            groupNamePtr = entryPtr `advancePtr` 1
-        groupNumber <- peek entryPtr
-        groupNameLen <- lengthArray0 0 groupNamePtr
-        groupName <- Text.fromPtr
-            (castCUs groupNamePtr)
-            (fromIntegral groupNameLen)
-        return (fromIntegral groupNumber, groupName)
-
-    captureCount <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
-
-    return $ map (names IM.!?) [0 .. fromIntegral captureCount]
-
-getCodeInfo :: (Storable a) => Ptr Pcre2_code -> CUInt -> IO a
-getCodeInfo codePtr what = alloca $ \wherePtr -> do
-    pcre2_pattern_info codePtr what wherePtr >>= check (== 0)
-    peek wherePtr
-
----------------------------- From Option.hs ------------------------------------
-
-instance Semigroup Option where
-    opt0 <> opt1 = case listOptions opt0 ++ listOptions opt1 of
-        [opt] -> opt
-        opts  -> Options opts
-
-instance Monoid Option where
-    mempty = Options []
-
-listOptions :: Option -> [Option]
-listOptions (Options opts) = opts
-listOptions opt            = [opt]
-
-data Option
-    = Options [Option]
-    -- Compile options
-    | Anchored
-    | AllowEmptyClass
-    | AltBsuxLegacy
-    | AltCircumflex
-    | AltVerbNames
-    | AutoCallout
-    | Caseless
-    | DollarEndOnly
-    | DotAll
-    | DupNames
-    | EndAnchored
-    | Extended
-    | ExtendedMore
-    | FirstLine
-    | Literal
-    | MatchUnsetBackRef
-    | Multiline
-    | NeverBackslashC
-    | NeverUcp
-    | NoAutoCapture
-    | NoAutoPossess
-    | NoDotStarAnchor
-    | NoStartOptimize
-    | Ucp
-    | Ungreedy
-    | UseOffsetLimit
-    | Utf
-    -- Compile context options
-    | Bsr Bsr
-    | AltBsux
-    | BadEscapeIsLiteral
-    | EscapedCrIsLf
-    | MatchLine
-    | MatchWord
-    | MaxPatternLength Int
-    | Newline Newline
-    | ParensNestLimit Int
-    -- Compile recursion guard
-    | UnsafeCompileRecGuard (Int -> IO Bool)
-    -- Match options
-    | NotBol
-    | NotEol
-    | NotEmpty
-    | NotEmptyAtStart
-    | PartialHard
-    | PartialSoft
-    -- Substitute options
-    | SubReplacementOnly
-    | SubGlobal
-    | SubLiteral
-    | SubUnknownEmpty
-    -- Callout
-    | UnsafeCallout (CalloutInfo -> IO CalloutResult)
-    -- Substition callout
-    | UnsafeSubCallout (SubCalloutInfo -> IO SubCalloutResult)
-    -- Match context options
-    | OffsetLimit Int
-    | HeapLimit Int
-    | MatchLimit Int
-    | DepthLimit Int
-
-data SubCalloutInfo
-    = SubCalloutInfo {
-        subCalloutSubsCount   :: Int,
-        subCalloutCaptures    :: NonEmpty (Maybe Text),
-        subCalloutSubject     :: Text,
-        subCalloutReplacement :: Text}
-    deriving (Show, Eq)
-
+-- | FFI wrapper.
 foreign import ccall "wrapper" mkRecursionGuard
     :: (CUInt -> Ptr a -> IO CInt)
     -> IO (FunPtr (CUInt -> Ptr a -> IO CInt))
 
+-- | FFI wrapper.
 foreign import ccall "wrapper" mkCallout
     :: (Ptr block -> Ptr a -> IO CInt)
     -> IO (FunPtr (Ptr block -> Ptr a -> IO CInt))
 
-data CalloutInfo
-    = CalloutInfo {
-        calloutIndex       :: CalloutIndex,
-        calloutCaptures    :: NonEmpty (Maybe Text),
-        calloutSubject     :: Text,
-        calloutMark        :: Maybe Text,
-        calloutIsFirst     :: Bool,
-        calloutBacktracked :: Bool}
-    deriving (Show, Eq)
-
-data CalloutIndex
-    = CalloutNumber Int
-    | CalloutName Text
-    | CalloutPatternPos Int Int
-    deriving (Show, Eq)
-
-data CalloutResult
-    = CalloutProceed
-    | CalloutNoMatchHere
-    | CalloutNoMatch
-    deriving (Show, Eq)
-
-data SubCalloutResult
-    = SubCalloutAccept
-    | SubCalloutSkip
-    | SubCalloutAbort
-    deriving (Show, Eq)
-
+-- | Within a callout, marshal the original subject and @pcre2_callout_block@
+-- data to Haskell and present to the user function.  Ensure no pointers are
+-- leaked!
 getCalloutInfo :: Text -> Ptr Pcre2_callout_block -> IO CalloutInfo
 getCalloutInfo subject blockPtr = do
     calloutIndex <- do
@@ -721,6 +932,9 @@ getCalloutInfo subject blockPtr = do
 
     return $ CalloutInfo {..}
 
+-- | Within a substitution callout, marshal the original subject and
+-- @pcre2_substitute_callout_block@ data to Haskell and present to the user
+-- function.  Ensure no pointers are leaked!
 getSubCalloutInfo
     :: Text -> Ptr Pcre2_substitute_callout_block -> IO SubCalloutInfo
 getSubCalloutInfo subject blockPtr = do
@@ -752,205 +966,24 @@ getSubCalloutInfo subject blockPtr = do
 
     return $ SubCalloutInfo {..}
 
--- | Equivalent to @flip fix@.
---
--- Used to express a recursive function of one argument that is called only once
--- on an initial value:
---
--- > let go x = ... in go x0
---
--- as:
---
--- > fix1 x0 $ \go x -> ...
-fix1 :: a -> ((a -> b) -> a -> b) -> b
-fix1 x f = fix f x
+-- | If there was a callout and it threw an exception, rethrow it.
+maybeRethrow :: Maybe (IORef CalloutState) -> IO ()
+maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
 
--- | Like `fix1`, but for a function of two arguments.
-fix2 :: a -> b -> ((a -> b -> t3) -> a -> b -> t3) -> t3
-fix2 x y f = fix f x y
+-- * Packaging @Matcher@s and @Subber@s as public API functions
 
-applyOption :: Option -> [AppliedOption]
-applyOption = \case
-    Options opts -> opts >>= applyOption
-
-    -- CompileOption
-    Anchored          -> [CompileOption pcre2_ANCHORED]
-    AllowEmptyClass   -> [CompileOption pcre2_ALLOW_EMPTY_CLASS]
-    AltBsuxLegacy     -> [CompileOption pcre2_ALT_BSUX]
-    AltCircumflex     -> [CompileOption pcre2_ALT_CIRCUMFLEX]
-    AltVerbNames      -> [CompileOption pcre2_ALT_VERBNAMES]
-    AutoCallout       -> [CompileOption pcre2_AUTO_CALLOUT]
-    Caseless          -> [CompileOption pcre2_CASELESS]
-    DollarEndOnly     -> [CompileOption pcre2_DOLLAR_ENDONLY]
-    DotAll            -> [CompileOption pcre2_DOTALL]
-    DupNames          -> [CompileOption pcre2_DUPNAMES]
-    EndAnchored       -> [CompileOption pcre2_ENDANCHORED]
-    Extended          -> [CompileOption pcre2_EXTENDED]
-    ExtendedMore      -> [CompileOption pcre2_EXTENDED_MORE]
-    FirstLine         -> [CompileOption pcre2_FIRSTLINE]
-    Literal           -> [CompileOption pcre2_LITERAL]
-    MatchUnsetBackRef -> [CompileOption pcre2_MATCH_UNSET_BACKREF]
-    Multiline         -> [CompileOption pcre2_MULTILINE]
-    NeverBackslashC   -> [CompileOption pcre2_NEVER_BACKSLASH_C]
-    NeverUcp          -> [CompileOption pcre2_NEVER_UCP]
-    NoAutoCapture     -> [CompileOption pcre2_NO_AUTO_CAPTURE]
-    NoAutoPossess     -> [CompileOption pcre2_NO_AUTO_POSSESS]
-    NoDotStarAnchor   -> [CompileOption pcre2_NO_DOTSTAR_ANCHOR]
-    NoStartOptimize   -> [CompileOption pcre2_NO_START_OPTIMIZE]
-    Ucp               -> [CompileOption pcre2_UCP]
-    Ungreedy          -> [CompileOption pcre2_UNGREEDY]
-    UseOffsetLimit    -> [CompileOption pcre2_USE_OFFSET_LIMIT]
-    Utf               -> [CompileOption pcre2_UTF]
-
-    -- ExtraCompileOption
-    AltBsux            -> [CompileExtraOption pcre2_EXTRA_ALT_BSUX]
-    BadEscapeIsLiteral -> [CompileExtraOption pcre2_EXTRA_BAD_ESCAPE_IS_LITERAL]
-    EscapedCrIsLf      -> [CompileExtraOption pcre2_EXTRA_ESCAPED_CR_IS_LF]
-    MatchLine          -> [CompileExtraOption pcre2_EXTRA_MATCH_LINE]
-    MatchWord          -> [CompileExtraOption pcre2_EXTRA_MATCH_WORD]
-
-    -- CompileContextOption
-    Bsr bsr -> unary
-        CompileContextOption pcre2_set_bsr (bsrToC bsr)
-    MaxPatternLength len -> unary
-        CompileContextOption pcre2_set_max_pattern_length (fromIntegral len)
-    Newline newline -> unary
-        CompileContextOption pcre2_set_newline (newlineToC newline)
-    ParensNestLimit limit -> unary
-        CompileContextOption pcre2_set_parens_nest_limit (fromIntegral limit)
-
-    -- CompileRecGuardOption
-    UnsafeCompileRecGuard f -> [CompileRecGuardOption f]
-
-    -- MatchOption
-    NotBol             -> [MatchOption pcre2_NOTBOL]
-    NotEol             -> [MatchOption pcre2_NOTEOL]
-    NotEmpty           -> [MatchOption pcre2_NOTEMPTY]
-    NotEmptyAtStart    -> [MatchOption pcre2_NOTEMPTY_ATSTART]
-    PartialHard        -> [MatchOption pcre2_PARTIAL_HARD]
-    PartialSoft        -> [MatchOption pcre2_PARTIAL_SOFT]
-    SubReplacementOnly -> [MatchOption pcre2_SUBSTITUTE_REPLACEMENT_ONLY]
-    SubGlobal          -> [MatchOption pcre2_SUBSTITUTE_GLOBAL]
-    SubLiteral         -> [MatchOption pcre2_SUBSTITUTE_LITERAL]
-    SubUnknownEmpty    -> [
-        MatchOption pcre2_SUBSTITUTE_UNKNOWN_UNSET,
-        MatchOption pcre2_SUBSTITUTE_UNSET_EMPTY]
-
-    -- CalloutOption
-    UnsafeCallout f -> [CalloutOption f]
-
-    -- SubCalloutOption
-    UnsafeSubCallout f -> [SubCalloutOption f]
-
-    -- MatchContextOption
-    OffsetLimit limit -> applyOption UseOffsetLimit ++ unary
-        MatchContextOption pcre2_set_offset_limit (fromIntegral limit)
-    HeapLimit limit -> unary
-        MatchContextOption pcre2_set_heap_limit (fromIntegral limit)
-    MatchLimit limit -> unary
-        MatchContextOption pcre2_set_match_limit (fromIntegral limit)
-    DepthLimit limit -> unary
-        MatchContextOption pcre2_set_depth_limit (fromIntegral limit)
-
-    where
-    unary ctor f x = (: []) $ ctor $ \ctx -> withForeignPtr ctx $ \ctxPtr ->
-        f ctxPtr x >>= check (== 0)
-
-data AppliedOption
-    = CompileOption CUInt
-    | CompileExtraOption CUInt
-    | CompileContextOption (CompileContext -> IO ())
-    | CompileRecGuardOption (Int -> IO Bool)
-    | MatchOption CUInt
-    | CalloutOption (CalloutInfo -> IO CalloutResult)
-    | SubCalloutOption (SubCalloutInfo -> IO SubCalloutResult)
-    | MatchContextOption (MatchContext -> IO ())
-
-extractOpts :: (AppliedOption -> Either a AppliedOption) -> ExtractOpts [a]
-extractOpts discrim = state $ partitionEithers . map discrim
-
-extractCompileContextUpdates :: ExtractOpts [CompileContext -> IO ()]
-extractCompileContextUpdates = extractOpts $ \case
-    CompileContextOption update -> Left update
-    opt                         -> Right opt
-
-extractCompileExtraOptions :: ExtractOpts CUInt
-extractCompileExtraOptions = fmap (foldl' (.|.) 0) $ extractOpts $ \case
-    CompileExtraOption flag -> Left flag
-    opt                     -> Right opt
-
-extractRecursionGuard :: ExtractOpts (Maybe (Int -> IO Bool))
-extractRecursionGuard = fmap safeLast $ extractOpts $ \case
-    CompileRecGuardOption f -> Left f
-    opt                     -> Right opt
-
-extractCompileOptions :: ExtractOpts CUInt
-extractCompileOptions = fmap (foldl' (.|.) 0) $ extractOpts $ \case
-    CompileOption flag -> Left flag
-    opt                -> Right opt
-
-extractMatchContextUpdates :: ExtractOpts [MatchContext -> IO ()]
-extractMatchContextUpdates = extractOpts $ \case
-    MatchContextOption update -> Left update
-    opt                       -> Right opt
-
-extractCallout :: ExtractOpts (Maybe (CalloutInfo -> IO CalloutResult))
-extractCallout = fmap safeLast $ extractOpts $ \case
-    CalloutOption f -> Left f
-    opt             -> Right opt
-
-extractSubCallout :: ExtractOpts (Maybe (SubCalloutInfo -> IO SubCalloutResult))
-extractSubCallout = fmap safeLast $ extractOpts $ \case
-    SubCalloutOption f -> Left f
-    opt                -> Right opt
-
-extractMatchOptions :: ExtractOpts CUInt
-extractMatchOptions = fmap (foldl' (.|.) 0) $ extractOpts $ \case
-    MatchOption flag -> Left flag
-    opt              -> Right opt
-
------------------------------ From Captures.hs ---------------------------------
-
--- | A wrapper around a list of captures that carries additional type-level
--- information about the number and names of those captures.
-newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
-
--- | The kind of that information.
---
--- This definition is not part of the public API and may change without warning!
-type CapturesInfo = (Nat, [(Symbol, Nat)])
-
--- | Look up the number of a capture at compile time, either by number or by
--- name.  Throw a helpful 'TypeError' if the index doesn\'t exist.
-type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
-    CaptNum (number :: Nat) '(hi, _) =
-        If (CmpNat number 0 == 'LT || CmpNat number hi == 'GT)
-            {-then-} (TypeError
-                (TypeLits.Text "No capture numbered " :<>: ShowType number))
-            {-else-} number
-
-    CaptNum (name :: Symbol) '(_, '(name, number) ': _) = number
-    CaptNum (name :: Symbol) '(hi, _ ': kvs) = 1 + CaptNum name '(hi, kvs)
-    CaptNum (name :: Symbol) _ = TypeError
-        (TypeLits.Text "No capture named " :<>: ShowType name)
-
-    CaptNum _ _ = TypeError
-        (TypeLits.Text "Capture index must be a number (Nat) or name (Symbol)")
-
-capture :: forall i info number. (CaptNum i info ~ number, KnownNat number) =>
-    Captures info -> Text
-capture = view $ _capture @i
-
--- | The most general form of a matching/substitution function.
+-- | The most general form of a matching function, which can also be used as a
+-- @Setter'@ to perform substitutions at the Haskell level.
 --
 -- When any capture is forced, all captures are forced in order to GC C data
 -- more promptly.  When we need _some_ captures but not _all_ captures, we can
--- pass in a whitelist of the numbers of captures we want.
+-- pass in a whitelist of the numbers of captures we want, thereby avoiding
+-- unnecessary allocations.
 --
 -- Internal only!  Users should not (have to) know about `Matcher`.
 _capturesInternal
     :: Matcher
-    -> Maybe (NonEmpty Int)
+    -> Maybe (NonEmpty Int) -- ^ whitelist (@Nothing@ means retrieve all)
     -> Traversal' Text (NonEmpty Text)
 _capturesInternal matcher whitelist f subject
     | result == pcre2_ERROR_NOMATCH = pure subject
@@ -982,38 +1015,258 @@ _capturesInternal matcher whitelist f subject
         -- cases where no substring is changed.
         in [thinSlice subject (SliceRange off offEnd) | off /= offEnd]
 
-_capture :: forall i info number. (CaptNum i info ~ number, KnownNat number) =>
+-- | Strictly read specifically indexed captures' offsets from match results.
+-- Does not check if indexes are in bounds of the ovector!
+getOvecEntriesAt :: NonEmpty Int -> MatchData -> IO (NonEmpty SliceRange)
+getOvecEntriesAt ns matchData = withForeignPtr matchData $ \matchDataPtr -> do
+    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+
+    let peekOvec :: Int -> IO Text.I16
+        peekOvec = fmap fromIntegral . peekElemOff ovecPtr
+
+    forM ns $ \n -> liftM2 SliceRange
+        (peekOvec $ n * 2)
+        (peekOvec $ n * 2 + 1)
+
+-- | Helper to create non-Template Haskell API functions.  They all take options
+-- and a pattern, and then do something via a 'Matcher'.
+withMatcher :: (Matcher -> a) -> Option -> Text -> a
+withMatcher f option patt = f $ unsafePerformIO $ mkCompiledMatcher option patt
+
+-- | Match a pattern to a subject and return a list of captures, or @[]@ if no
+-- match.
+captures :: Text -> Text -> [Text]
+captures = capturesOpt mempty
+
+-- | @captures = capturesOpt mempty@
+capturesOpt :: Option -> Text -> Text -> [Text]
+capturesOpt option patt = view $ _capturesOpt option patt . to NE.toList
+
+-- | Match a pattern to a subject and return a non-empty list of captures in an
+-- `Alternative`, or `empty` if no match.  Typically the @Alternative@ instance
+-- will be `Maybe`, but other useful ones exist, notably those of `GHC.Conc.STM`
+-- and of the various parser combinator libraries.
+--
+-- > let parseDate = capturesA "(\\d{4})-(\\d{2})-(\\d{2})"
+-- > in case parseDate "submitted 2020-10-20" of
+-- >     Just (date :| [y, m, d]) -> ...
+-- >     Nothing                  -> putStrLn "didn't match"
+--
+-- Note that PCRE2 errors are distinct from match failures and are not
+-- represented as `empty`; they are thrown purely as `SomePcre2Exception`s.
+-- Returning @IO (NonEmpty Text)@ from this function will not enable you to
+-- catch them; you must `evaluate` the results:
+--
+-- > (badRegex "subject" >>= evaluate) `catch` \(e :: SomePcre2Exception) -> ...
+capturesA :: (Alternative f) => Text -> Text -> f (NonEmpty Text)
+capturesA = capturesOptA mempty
+
+-- | @capturesA = capturesOptA mempty@
+capturesOptA :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
+capturesOptA option patt = maybe empty pure . preview (_capturesOpt option patt)
+
+-- | Does the pattern match the subject?
+matches :: Text -> Text -> Bool
+matches = matchesOpt mempty
+
+-- | @matches = matchesOpt mempty@
+matchesOpt :: Option -> Text -> Text -> Bool
+matchesOpt option patt = has $ _capturesOpt option patt
+
+-- | Match a pattern to a subject and return only the portion that matched, i.e.
+-- the 0th capture.
+match :: (Alternative f) => Text -> Text -> f Text
+match = matchOpt mempty
+
+-- | @match = matchOpt mempty@
+matchOpt :: (Alternative f) => Option -> Text -> Text -> f Text
+matchOpt = withMatcher $ \matcher ->
+    let _match = _capturesInternal matcher (Just $ 0 :| []) . _headNE
+    in maybe empty pure . preview _match
+
+-- | Perform at most one substitution.
+-- 
+-- >>> sub "(\\w+) calling the (\\w+)" "$2 calling the $1" "the pot calling the kettle black"
+-- "the kettle calling the pot black"
+sub
+    :: Text -- ^ pattern
+    -> Text -- ^ replacement
+    -> Text -- ^ subject
+    -> Text -- ^ result
+sub = subOpt mempty
+
+-- | Perform substitutions globally.
+--
+-- >>> gsub "a" "o" "apples and bananas"
+-- "opples ond bononos"
+gsub :: Text -> Text -> Text -> Text
+gsub = subOpt SubGlobal
+
+-- | @
+-- sub = subOpt mempty
+-- gsub = subOpt SubGlobal
+-- @
+subOpt :: Option -> Text -> Text -> Text -> Text
+subOpt option patt replacement = snd . unsafePerformIO . subber where
+    subber = unsafePerformIO $ mkCompiledSubber replacement option patt
+
+-- | Given a pattern, produce an affine traversal (0 or 1 targets) that focuses
+-- from a subject to a potential non-empty list of captures.
+--
+-- Substitution works in the following way:  If a capture is set such that the
+-- new `Text` is not equal to the old one, a substitution occurs, otherwise it
+-- doesn\'t.  This matters in cases where a capture encloses another capture
+-- &mdash;notably, /all/ parenthesized captures are enclosed by the 0th capture,
+-- the region of the subject matched by the whole pattern.
+--
+-- > let threeAndMiddle = _captures ". (.) ."
+-- > print $ set threeAndMiddle ("A A A" :| ["B"]) "A A A" -- "A B A"
+-- > print $ set threeAndMiddle ("A B A" :| ["A"]) "A A A" -- "A B A"
+--
+-- Changing multiple overlapping captures is unsupported and won\'t do what you
+-- want.
+--
+-- If the list becomes longer for some reason, the extra elements are ignored.
+-- If it\'s shortened, the absent elements are considered to be unchanged.
+--
+-- It's recommended that the list be modified capture-wise, using @ix@.
+--
+-- > print $ "Well bust my buttons!" &~ do
+-- >     zoom [|_re|(\w+) my (\w+)|] $ do
+-- >         _capture @1 . _head .= 'd'
+-- >         _capture @2 %= Text.reverse
+-- >     _last .= '?'
+-- >
+-- > -- "Well dust my snottub?"
+_captures :: Text -> Traversal' Text (NonEmpty Text)
+_captures = _capturesOpt mempty
+
+-- | @_captures = _capturesOpt mempty@
+_capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
+_capturesOpt = withMatcher $ \matcher -> _capturesInternal matcher Nothing
+
+-- * Support for Template Haskell compile-time regex analysis
+
+-- | From options and pattern, determine parenthesized patterns\' names in
+-- order.
+predictCaptureNames :: Option -> Text -> IO [Maybe Text]
+predictCaptureNames option patt = do
+    code <- evalStateT
+        (extractCompileEnv >>= extractCode patt)
+        (applyOption option)
+
+    withForeignPtr code getCaptureNames
+
+-- | NOTE: The 0th capture is always named @Nothing@.
+getCaptureNames :: Ptr Pcre2_code -> IO [Maybe Text]
+getCaptureNames codePtr = do
+    nameCount <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMECOUNT
+    nameEntrySize <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMEENTRYSIZE
+    nameTable <- getCodeInfo @PCRE2_SPTR codePtr pcre2_INFO_NAMETABLE
+
+    -- Can't do [0 .. nameCount - 1] because it underflows when nameCount == 0
+    let indexes = takeWhile (< nameCount) [0 ..]
+    names <- fmap IM.fromList $ forM indexes $ \i -> do
+        let entryPtr = nameTable `advancePtr` fromIntegral (i * nameEntrySize)
+            groupNamePtr = entryPtr `advancePtr` 1
+        groupNumber <- peek entryPtr
+        groupNameLen <- lengthArray0 0 groupNamePtr
+        groupName <- Text.fromPtr
+            (castCUs groupNamePtr)
+            (fromIntegral groupNameLen)
+        return (fromIntegral groupNumber, groupName)
+
+    captureCount <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
+
+    return $ map (names IM.!?) [0 .. fromIntegral captureCount]
+
+-- | Low-level access to compiled pattern info, per the docs.
+getCodeInfo :: (Storable a) => Ptr Pcre2_code -> CUInt -> IO a
+getCodeInfo codePtr what = alloca $ \wherePtr -> do
+    pcre2_pattern_info codePtr what wherePtr >>= check (== 0)
+    peek wherePtr
+
+-- | A wrapper around a list of captures that carries additional type-level
+-- information about the number and names of those captures.
+newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
+
+-- | The kind of that information.
+--
+-- This definition is not part of the public API and may change without warning!
+type CapturesInfo = (Nat, [(Symbol, Nat)])
+
+-- | Look up the number of a capture at compile time, either by number or by
+-- name.  Throw a helpful 'TypeError' if the index doesn\'t exist.
+type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
+    CaptNum (num :: Nat) '(hi, _) =
+        If (CmpNat num 0 == 'LT || CmpNat num hi == 'GT)
+            -- then
+            (TypeError (TypeLits.Text "No capture numbered " :<>: ShowType num))
+            -- else
+            num
+
+    CaptNum (name :: Symbol) '(_, '(name, num) ': _) = num
+    CaptNum (name :: Symbol) '(hi, _ ': kvs) = 1 + CaptNum name '(hi, kvs)
+    CaptNum (name :: Symbol) _ = TypeError
+        (TypeLits.Text "No capture named " :<>: ShowType name)
+
+    CaptNum _ _ = TypeError
+        (TypeLits.Text "Capture index must be a number (Nat) or name (Symbol)")
+
+-- | Lookup a capture in a `Captures` result obtained from a Template
+-- Haskell-generated matching function.  The index is verified at the type level
+-- and cannot fail at runtime.
+capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
+    Captures info -> Text
+capture = view $ _capture @i
+
+-- > {-# LANGUAGE DataKinds #-}
+-- > {-# LANGUAGE OverloadedStrings #-}
+-- > {-# LANGUAGE QuasiQuotes #-}
+-- > {-# LANGUAGE TemplateHaskell #-}
+-- > {-# LANGUAGE TypeApplications #-}
+-- >
+-- > main :: IO ()
+-- > main = case [re|(\S+)\s*(?<middle>\S+)|] "foo bar baz" of
+-- >     Nothing -> error "Doesn't match"
+-- >     Just cs -> do
+-- >         print $ capture @"middle" cs              -- "bar"
+-- >         print $ capture @1 cs                     -- "foo"
+
+-- > {-# LANGUAGE DataKinds #-}
+-- > {-# LANGUAGE QuasiQuotes #-}
+-- > {-# LANGUAGE TemplateHaskell #-}
+-- > {-# LANGUAGE TypeApplications #-}
+-- >
+-- > import Control.Lens
+-- > import Data.Text.Lens
+-- >
+-- > embeddedNumber :: Traversal' String Int
+-- > embeddedNumber = packed . [_re|\d+|] . _capture @0 . unpacked . _Show
+-- >
+-- > main :: IO ()
+-- > main = print $ "There are 14 competing standards" & embeddedNumber %~ (+ 1)
+-- >
+-- > -- "There are 15 competing standards"
+
+-- | Focus from a `Captures` to a capture.  The index is verified at the type
+-- level and cannot fail at runtime.
+_capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
     Lens' (Captures info) Text
 _capture f (Captures cs) =
-    let (ls, c : rs) = NE.splitAt (fromInteger $ natVal @number Proxy) cs
+    let (ls, c : rs) = NE.splitAt (fromInteger $ natVal @num Proxy) cs
     in f c <&> \c' -> Captures $ NE.fromList $ ls ++ c' : rs
 
--- Lens types and utilities
+-- * Exceptions
 
-type Lens'      s a = forall f. (Functor f)     => (a -> f a) -> s -> f s
-type Traversal' s a = forall f. (Applicative f) => (a -> f a) -> s -> f s
-
-_headNE :: Lens' (NonEmpty a) a
-_headNE f (x :| xs) = f x <&> \x' -> x' :| xs
-
-preview l = getFirst . getConst . l (Const . First . Just)
-view l = getConst . l Const
-to k f = Const . getConst . f . k
-has l = getAny . getConst . l (\_ -> Const $ Any True)
-over l f = runIdentity . l (Identity . f)
-
------------------------- Common.hs ---------------------------------------------
-
-type CompileContext = ForeignPtr Pcre2_compile_context
-type MatchContext   = ForeignPtr Pcre2_match_context
-type Code           = ForeignPtr Pcre2_code
-type MatchData      = ForeignPtr Pcre2_match_data
-
+-- | The root of the PCRE2 exception hierarchy.
 data SomePcre2Exception = forall e. (Exception e) => SomePcre2Exception e
 instance Show SomePcre2Exception where
     show (SomePcre2Exception e) = show e
 instance Exception SomePcre2Exception
 
+-- | Vanilla PCRE2 exceptions with messages generated by the underlying C
+-- library.
 newtype Pcre2Exception = Pcre2Exception CInt
 instance Show Pcre2Exception where
     show (Pcre2Exception x) = Text.unpack $ getErrorMessage x
@@ -1021,6 +1274,9 @@ instance Exception Pcre2Exception where
     toException = toException . SomePcre2Exception
     fromException = fromException >=> \(SomePcre2Exception e) -> cast e
 
+-- | PCRE2 compile exceptions.  Along with a message stating the cause, we
+-- show the pattern with a cursor pointing at where the error is (if not after
+-- the last character).
 data Pcre2CompileException = Pcre2CompileException !CInt !Text !PCRE2_SIZE
 instance Show Pcre2CompileException where
     show (Pcre2CompileException x patt offset) = intercalate "\n" $ [
@@ -1034,6 +1290,7 @@ instance Exception Pcre2CompileException where
     toException = toException . SomePcre2Exception
     fromException = fromException >=> \(SomePcre2Exception e) -> cast e
 
+-- | Built-in message corresponding to the integer error code.
 getErrorMessage :: CInt -> Text
 getErrorMessage errorCode = unsafePerformIO $ do
     let bufCUs = 120
@@ -1041,66 +1298,20 @@ getErrorMessage errorCode = unsafePerformIO $ do
         cus <- pcre2_get_error_message errorCode bufPtr (fromIntegral bufCUs)
         Text.fromPtr (castCUs bufPtr) (fromIntegral cus)
 
+-- | Most PCRE2 C functions return an @int@ indicating a possible error.  Test
+-- it against a predicate, and throw an exception upon failure.
 check :: (CInt -> Bool) -> CInt -> IO ()
 check p x = unless (p x) $ throwIO $ Pcre2Exception x
 
-data Bsr
-    = BsrAnyCrlf
-    | BsrUnicode
-    deriving (Eq, Show)
+-- * PCRE2 compile-time config
 
-bsrFromC :: CUInt -> Bsr
-bsrFromC x
-    | x == pcre2_BSR_UNICODE = BsrUnicode
-    | x == pcre2_BSR_ANYCRLF = BsrAnyCrlf
-    | otherwise              = error $ "bsrFromC: bad value " ++ show x
-
-bsrToC :: Bsr -> CUInt
-bsrToC BsrUnicode = pcre2_BSR_UNICODE
-bsrToC BsrAnyCrlf = pcre2_BSR_ANYCRLF
-
-data Newline
-    = NewlineCr
-    | NewlineLf
-    | NewlineCrlf
-    | NewlineAny
-    | NewlineAnyCrlf
-    | NewlineNul
-    deriving (Eq, Show)
-
-newlineFromC :: CUInt -> Newline
-newlineFromC x
-    | x == pcre2_NEWLINE_CR      = NewlineCr
-    | x == pcre2_NEWLINE_LF      = NewlineLf
-    | x == pcre2_NEWLINE_CRLF    = NewlineCrlf
-    | x == pcre2_NEWLINE_ANY     = NewlineAny
-    | x == pcre2_NEWLINE_ANYCRLF = NewlineAnyCrlf
-    | x == pcre2_NEWLINE_NUL     = NewlineNul
-    | otherwise                  = error $ "newlineFromC: bad value " ++ show x
-
-newlineToC :: Newline -> CUInt
-newlineToC NewlineCr      = pcre2_NEWLINE_CR
-newlineToC NewlineLf      = pcre2_NEWLINE_LF
-newlineToC NewlineCrlf    = pcre2_NEWLINE_CRLF
-newlineToC NewlineAny     = pcre2_NEWLINE_ANY
-newlineToC NewlineAnyCrlf = pcre2_NEWLINE_ANYCRLF
-newlineToC NewlineNul     = pcre2_NEWLINE_NUL
-
--- | Probably unnecessary, but unrestricted 'castPtr' feels dangerous.
-class CastCUs a b | a -> b where
-    castCUs :: Ptr a -> Ptr b
-    castCUs = castPtr
-    {-# INLINE castCUs #-}
-instance CastCUs CUShort Word16
-instance CastCUs Word16 CUShort
-
--------------------------------- Config.hs -------------------------------------
-
+-- | Helper for getting PCRE2 compile-time config integers.
 getConfigNumeric :: CUInt -> CUInt
 getConfigNumeric what = unsafePerformIO $ alloca $ \ptr -> do
     pcre2_config what ptr
     peek ptr
 
+-- | Helper for getting PCRE2 compile-time config strings.
 getConfigString :: CUInt -> Maybe Text
 getConfigString what = unsafePerformIO $ do
     len <- pcre2_config what nullPtr
@@ -1111,49 +1322,66 @@ getConfigString what = unsafePerformIO $ do
             pcre2_config what ptr
             Text.fromPtr ptr (fromIntegral len - 1)
 
+-- | See `Bsr`.
 defaultBsr :: Bsr
 defaultBsr = bsrFromC $ getConfigNumeric pcre2_CONFIG_BSR
 
+-- | Which code widths PCRE2 is compiled to operate on.  Can be any combination
+-- of 8, 16, and 32.  Should be @[16]@ but provided here for completeness.
 compiledWidths :: [Int]
 compiledWidths =
     let bitmap = getConfigNumeric pcre2_CONFIG_COMPILED_WIDTHS
     in [w | (b, w) <- [(1, 8), (2, 16), (4, 32)], b .&. bitmap /= 0]
 
+-- | See `DepthLimit`.
 defaultDepthLimit :: Int
 defaultDepthLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_DEPTHLIMIT
 
+-- | See `HeapLimit`.
 defaultHeapLimit :: Int
 defaultHeapLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_HEAPLIMIT
 
+-- | Provided here for completeness.
 supportsJit :: Bool
 supportsJit = getConfigNumeric pcre2_CONFIG_JIT == 1
 
+-- | A nice description of the CPU architecture JIT support is compiled for, if
+-- any.
 jitTarget :: Maybe Text
 jitTarget = getConfigString pcre2_CONFIG_JITTARGET
 
+-- | Number of bytes used for internal linkage in compiled regexes.
 linkSize :: Int
 linkSize = fromIntegral $ getConfigNumeric pcre2_CONFIG_LINKSIZE
 
+-- | See `MatchLimit`.
 defaultMatchLimit :: Int
 defaultMatchLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_MATCHLIMIT
 
+-- | See `Newline`.
 defaultNewline :: Newline
 defaultNewline = newlineFromC $ getConfigNumeric pcre2_CONFIG_NEWLINE
 
+-- | See `NeverBackslashC`.
 neverBackslashC :: Bool
 neverBackslashC = getConfigNumeric pcre2_CONFIG_NEVER_BACKSLASH_C == 1
 
-parensLimit :: Int
-parensLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_PARENSLIMIT
+-- | See `ParensLimit`.
+defaultParensLimit :: Int
+defaultParensLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_PARENSLIMIT
 
-tablesLength :: Int
-tablesLength = fromIntegral $ getConfigNumeric pcre2_CONFIG_TABLES_LENGTH
+-- | Size in bytes of PCRE2\'s built-in character processing tables.
+defaultTablesLength :: Int
+defaultTablesLength = fromIntegral $ getConfigNumeric pcre2_CONFIG_TABLES_LENGTH
 
+-- | Unicode version string such as @8.0.0@, or @Unicode not supported@.
 unicodeVersion :: Text
 unicodeVersion = fromJust $ getConfigString pcre2_CONFIG_UNICODE_VERSION
 
+-- | Is Unicode supported?
 supportsUnicode :: Bool
 supportsUnicode = getConfigNumeric pcre2_CONFIG_UNICODE == 1
 
+-- | PCRE2 C library version.
 version :: Text
 version = fromJust $ getConfigString pcre2_CONFIG_VERSION

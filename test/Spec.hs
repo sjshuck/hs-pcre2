@@ -27,7 +27,7 @@ set = (.~)
 
 main :: IO ()
 main = do
-    putStrLn $ "Tables length: " ++ show tablesLength
+    putStrLn $ "Tables length: " ++ show defaultTablesLength
 
     putStrLn $ "JIT support: " ++ show supportsJit
 
@@ -60,7 +60,7 @@ main = do
             c2 <- capture @2
             set (_capture @2) c1 . set (_capture @1) c2
 
-    let flippy = substitute "a" "o"
+    let flippy = sub "a" "o"
     print $ flippy "apples and bananas"
 
     let myOpts = mconcat [
@@ -74,6 +74,6 @@ main = do
                     then return SubCalloutSkip
                     else return SubCalloutAccept,
             UnsafeCompileRecGuard $ \i -> print i >> return True]
-        flippier = substituteOpt myOpts "(?C1)(a)(?C'xyz')" "o-------------"
+        flippier = subOpt myOpts "(?C1)(a)(?C'xyz')" "o-------------"
 
     print $ flippier "apples and bananas"
