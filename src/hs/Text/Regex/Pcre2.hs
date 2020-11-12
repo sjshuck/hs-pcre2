@@ -1,18 +1,37 @@
+-- | High-level Haskell facilities for PCRE2 regular expressions.
 module Text.Regex.Pcre2 (
+    -- * Matching and substitution
+
+    -- ** Basic matching functions
     captures,
     capturesOpt,
     capturesA,
     capturesOptA,
-    matches,
-    matchesOpt,
     match,
     matchOpt,
+    matches,
+    matchesOpt,
+    -- ** PCRE2-native substitution
     sub,
     gsub,
     subOpt,
-
+    -- ** Lens-powered matching and substitution
     _captures,
     _capturesOpt,
+    _match,
+    _matchOpt,
+
+    -- * Compile-time validation
+
+    -- ** Template Haskell facilities
+    re,
+    _re,
+    -- ** Type-indexed capture groups
+    Captures(),
+    capture,
+    _capture,
+
+    -- * Options
 
     Option(
         AllowEmptyClass,
@@ -71,17 +90,21 @@ module Text.Regex.Pcre2 (
     Bsr(..),
     Newline(..),
 
+    -- ** Callout interface
+    -- *** Capture callouts
     CalloutInfo(..),
     CalloutIndex(..),
     CalloutResult(..),
-
+    -- *** Substitution callouts
     SubCalloutInfo(..),
     SubCalloutResult(..),
 
+    -- * Dealing with exceptions
     SomePcre2Exception(),
     Pcre2Exception(),
     Pcre2CompileException(),
 
+    -- * PCRE2 build configuration
     defaultBsr,
     compiledWidths,
     defaultDepthLimit,
@@ -91,12 +114,13 @@ module Text.Regex.Pcre2 (
     linkSize,
     defaultMatchLimit,
     defaultNewline,
-    neverBackslashC,
+    defaultIsNeverBackslashC,
     defaultParensLimit,
     defaultTablesLength,
     unicodeVersion,
     supportsUnicode,
-    version)
+    pcreVersion)
 where
 
 import Text.Regex.Pcre2.Internal
+import Text.Regex.Pcre2.TH

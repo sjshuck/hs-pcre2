@@ -3,6 +3,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -136,7 +137,6 @@ preview l = getFirst . getConst . l (Const . First . Just)
 view l = getConst . l Const
 to k f = Const . getConst . f . k
 has l = getAny . getConst . l (\_ -> Const $ Any True)
-over l f = runIdentity . l (Identity . f)
 
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
@@ -152,8 +152,8 @@ type Subber = Text -> IO (CInt, Text)
 
 -- ** Options
 
--- | A single `Monoid` type representing nearly every facility the PCRE2
--- presents for tweaking the behavior of regex compilation and execution.
+-- | A single `Monoid` type representing nearly every facility PCRE2 presents
+-- for tweaking the behavior of regex compilation and execution.
 --
 -- All library functions that take options have the suffix @Opt@ in their names;
 -- for each of them, there\'s also a non-@Opt@ convenience function that simply
@@ -259,8 +259,8 @@ data Option
     -- results are concatenated.
     | SubUnknownEmpty -- ^ /Affects `subOpt`./  References in the replacement
     -- to non-existent captures don\'t error but evaluate to the empty string.
-    -- This is pretty dubious by me.  You should open a ticket and ask me to
-    -- remove it.
+    -- This is a pretty dubious move by me.  You should open a ticket and ask me
+    -- to remove it.
     | Ucp -- ^ Count Unicode characters in some character classes such as @\\d@.
     -- Incompatible with `NeverUcp`.
     | Ungreedy -- ^ Invert the effect of @?@.  Without it, quantifiers are
@@ -356,8 +356,8 @@ data SubCalloutInfo
 -- | Input for user-defined callouts.
 data CalloutInfo
     = CalloutInfo {
-        -- | The index of which capture we\'re on.  Note that the callout is
-        -- never run for the 0th capture.
+        -- | The index of which capture we\'re on.  Note that callouts are never
+        -- run for the 0th capture.
         calloutIndex :: CalloutIndex,
         -- | The captures that have been set so far.
         calloutCaptures :: NonEmpty (Maybe Text),
@@ -373,12 +373,12 @@ data CalloutInfo
         calloutBacktracked :: Bool}
     deriving (Show, Eq)
 
--- | Info supplied to callout functions.
+-- | What caused the callout.
 data CalloutIndex
-    = CalloutNumber Int -- ^ numbered and not 255 (auto-callout)
-    | CalloutName Text -- ^ named
-    | CalloutPatternPos Int Int -- ^ auto-callout&#x2014;half-open offset range
-    -- within the subject
+    = CalloutNumber Int -- ^ Numbered capture.
+    | CalloutName Text -- ^ Named capture.
+    | CalloutAuto Int Int -- ^ The item located at this half-open range of
+    -- offsets within the pattern.  See `AutoCallout`.
     deriving (Show, Eq)
 
 -- | Callout functions return one of these values, which dictates what happens
@@ -889,7 +889,7 @@ getCalloutInfo subject blockPtr = do
         if str == nullPtr
             then pcre2_callout_block_callout_number blockPtr >>= \case
                 -- Auto callout
-                255 -> liftM2 CalloutPatternPos pattPos itemLen where
+                255 -> liftM2 CalloutAuto pattPos itemLen where
                     pattPos = intVia pcre2_callout_block_pattern_position
                     itemLen = intVia pcre2_callout_block_next_item_length
                     intVia getter = fromIntegral <$> getter blockPtr
@@ -1050,8 +1050,8 @@ capturesOpt option patt = view $ _capturesOpt option patt . to NE.toList
 
 -- | Match a pattern to a subject and return a non-empty list of captures in an
 -- `Alternative`, or `empty` if no match.  Typically the @Alternative@ instance
--- will be `Maybe`, but other useful ones exist, notably those of `GHC.Conc.STM`
--- and of the various parser combinator libraries.
+-- will be `Maybe`, but other useful ones exist, notably `STM` and those of the
+-- various parser combinator libraries.
 --
 -- > let parseDate = capturesA "(\\d{4})-(\\d{2})-(\\d{2})"
 -- > in case parseDate "submitted 2020-10-20" of
@@ -1091,6 +1091,7 @@ matchOpt option patt = maybe empty pure . preview (_matchOpt option patt)
 -- | Perform at most one substitution.  See
 -- [the docs](https://pcre.org/current/doc/html/pcre2api.html#SEC36) for the
 -- special syntax of /replacement/.
+--
 -- >>> sub "(\\w+) calling the (\\w+)" "$2 calling the $1" "the pot calling the kettle black"
 -- "the kettle calling the pot black"
 sub
@@ -1382,8 +1383,8 @@ defaultNewline :: Newline
 defaultNewline = newlineFromC $ getConfigNumeric pcre2_CONFIG_NEWLINE
 
 -- | See `NeverBackslashC`.
-neverBackslashC :: Bool
-neverBackslashC = getConfigNumeric pcre2_CONFIG_NEVER_BACKSLASH_C == 1
+defaultIsNeverBackslashC :: Bool
+defaultIsNeverBackslashC = getConfigNumeric pcre2_CONFIG_NEVER_BACKSLASH_C == 1
 
 -- | See `ParensLimit`.
 defaultParensLimit :: Int
@@ -1393,14 +1394,17 @@ defaultParensLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_PARENSLIMIT
 defaultTablesLength :: Int
 defaultTablesLength = fromIntegral $ getConfigNumeric pcre2_CONFIG_TABLES_LENGTH
 
--- | Unicode version string such as @8.0.0@, or @Unicode not supported@.
-unicodeVersion :: Text
-unicodeVersion = fromJust $ getConfigString pcre2_CONFIG_UNICODE_VERSION
+-- | Unicode version string such as @8.0.0@, if Unicode is supported at all.
+unicodeVersion :: Maybe Text
+unicodeVersion = case getConfigString pcre2_CONFIG_UNICODE_VERSION of
+    Just "Unicode not supported" -> Nothing
+    v                            -> v
 
 -- | Was PCRE2 built with Unicode support?
 supportsUnicode :: Bool
 supportsUnicode = getConfigNumeric pcre2_CONFIG_UNICODE == 1
 
--- | PCRE2 C library version.
-version :: Text
-version = fromJust $ getConfigString pcre2_CONFIG_VERSION
+-- | Version of the built-in C library.  The versioning scheme is that PCRE
+-- legacy is 8.x and PCRE2 is 10.x, so this should be @10.@/something/.
+pcreVersion :: Text
+pcreVersion = fromJust $ getConfigString pcre2_CONFIG_VERSION

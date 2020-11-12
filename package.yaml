@@ -67,6 +67,9 @@ library:
   cc-options:
   - -DHAVE_CONFIG_H
   - -DPCRE2_CODE_UNIT_WIDTH=16
+  exposed-modules:
+  - Text.Regex.Pcre2
+  - Text.Regex.Pcre2.Foreign
 
 tests:
   pcre2-test:

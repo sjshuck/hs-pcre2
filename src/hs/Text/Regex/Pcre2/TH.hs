@@ -1,14 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Text.Regex.Pcre2.TH (
-    re,
-    _re,
-
-    Captures(),
-    capture,
-    _capture)
-where
+module Text.Regex.Pcre2.TH where
 
 import           Control.Applicative        (Alternative(..))
 import           Data.IORef

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 8f2015602800e6ca4d1963d285eb9159ac2c56bd87ba28eba04241001f7fd12e
+-- hash: 01b6074e0067b105d6446f2d73c69012cc2d79e08dbdfafd3ceabb50901647d1
 
 name:           pcre2
 version:        0.1.0.0
@@ -31,10 +31,10 @@ library
   exposed-modules:
       Text.Regex.Pcre2
       Text.Regex.Pcre2.Foreign
+  other-modules:
       Text.Regex.Pcre2.Foreign.TH
       Text.Regex.Pcre2.Internal
       Text.Regex.Pcre2.TH
-  other-modules:
       Paths_pcre2
   hs-source-dirs:
       src/hs
