@@ -154,7 +154,7 @@ type Subber = Text -> IO (CInt, Text)
 
 -- | A single `Monoid` type representing nearly every facility the PCRE2
 -- presents for tweaking the behavior of regex compilation and execution.
--- 
+--
 -- All library functions that take options have the suffix @Opt@ in their names;
 -- for each of them, there\'s also a non-@Opt@ convenience function that simply
 -- has the (unexported) `mempty` option.  For many uses, options won\'t be
@@ -263,7 +263,7 @@ data Option
     -- remove it.
     | Ucp -- ^ Count Unicode characters in some character classes such as @\\d@.
     -- Incompatible with `NeverUcp`.
-    | Ungreedy -- ^ Invert the effect of @?@&mdash;without it, quantifiers are
+    | Ungreedy -- ^ Invert the effect of @?@.  Without it, quantifiers are
     -- non-greedy; with it, they are greedy.  Equivalent to @(?U)@.
     | UnsafeCallout (CalloutInfo -> IO CalloutResult) -- ^ Run the given callout
     -- on every capture.  Multiples of this option before the rightmost are
@@ -293,8 +293,8 @@ instance Monoid Option where
 
 -- | What @\\R@, __b__ack__s__lash __R__, can mean.
 data Bsr
-    = BsrAnyCrlf -- ^ @\\r@, @\\n@, or @\\r\\n@
-    | BsrUnicode -- ^ any Unicode line ending sequence
+    = BsrUnicode -- ^ any Unicode line ending sequence
+    | BsrAnyCrlf -- ^ @\\r@, @\\n@, or @\\r\\n@
     deriving (Eq, Show)
 
 -- | C to Haskell.
@@ -311,12 +311,12 @@ bsrToC BsrAnyCrlf = pcre2_BSR_ANYCRLF
 
 -- | What\'s considered a newline.
 data Newline
-    = NewlineCr -- ^ @\\r@ only
-    | NewlineLf -- ^ @\\n@ only
-    | NewlineCrlf -- ^ @\\r\\n@ only
-    | NewlineAny -- ^ any Unicode line ending sequence
+    = NewlineCr      -- ^ @\\r@ only
+    | NewlineLf      -- ^ @\\n@ only
+    | NewlineCrlf    -- ^ @\\r\\n@ only
+    | NewlineAny     -- ^ any Unicode line ending sequence
     | NewlineAnyCrlf -- ^ any of the above
-    | NewlineNul -- ^ the NUL character, that is a binary zero
+    | NewlineNul     -- ^ binary zero
     deriving (Eq, Show)
 
 -- | C to Haskell.
@@ -377,7 +377,7 @@ data CalloutInfo
 data CalloutIndex
     = CalloutNumber Int -- ^ numbered and not 255 (auto-callout)
     | CalloutName Text -- ^ named
-    | CalloutPatternPos Int Int -- ^ auto-callout&mdash;half-open offset range
+    | CalloutPatternPos Int Int -- ^ auto-callout&#x2014;half-open offset range
     -- within the subject
     deriving (Show, Eq)
 
@@ -639,14 +639,14 @@ extractMatchEnv = do
 
     return $ MatchEnv {..}
 
--- | Helper for @mkCompiled*@ functions.  Basically, extract all options and
--- help produce a function that takes a `Text` subject and does something.
-mkCompiledSubjFun
+-- | Helper for @assemble*@ functions.  Basically, extract all options and help
+-- produce a function that takes a `Text` subject and does something.
+assembleSubjFun
     :: (Code -> MatchEnv -> CUInt -> Text -> IO a)
     -> Option
     -> Text
     -> IO (Text -> IO a)
-mkCompiledSubjFun mkSubjFun option patt =
+assembleSubjFun mkSubjFun option patt =
     runStateT extractAll (applyOption option) <&> \case
         (subjFun, []) -> subjFun
         _             -> error "BUG! Options not fully extracted"
@@ -661,11 +661,11 @@ mkCompiledSubjFun mkSubjFun option patt =
         return $ mkSubjFun code matchEnv matchOpts
 
 -- | Produce a `Matcher`.
-mkCompiledMatcher
+assembleMatcher
     :: Option
-    -> Text -- ^ pattern
+    -> Text       -- ^ pattern
     -> IO Matcher
-mkCompiledMatcher = mkCompiledSubjFun $ \code matchEnv opts ->
+assembleMatcher = assembleSubjFun $ \code matchEnv opts ->
     let matchTempEnvWithSubj = mkMatchTempEnv matchEnv
     in \subject -> withForeignPtr code $ \codePtr -> do
         matchData <- mkForeignPtr pcre2_match_data_free $
@@ -695,19 +695,21 @@ mkCompiledMatcher = mkCompiledSubjFun $ \code matchEnv opts ->
 --
 -- One potential issue arising from two attempts is running effectful callouts
 -- twice.  We mitigate this by skipping callouts the second time:
---   * all capture callouts, since they had run during the simulation; and
---   * those substitution callouts that had run the first time.
+--
+-- * all capture callouts, since they had run during the simulation, and
+--
+-- * those substitution callouts that had run the first time.
 --
 -- Therefore, the first time, log the substitution callout indexes that had run
 -- along with their results, and replay the log the second time, returning those
 -- same results without re-incurring effects.
-mkCompiledSubber
+assembleSubber
     :: Text      -- ^ replacement
     -> Option
     -> Text      -- ^ pattern
     -> IO Subber
-mkCompiledSubber replacement =
-    mkCompiledSubjFun $ \code firstMatchEnv opts ->
+assembleSubber replacement =
+    assembleSubjFun $ \code firstMatchEnv opts ->
     -- Subber
     \subject ->
     withForeignPtr code $ \codePtr ->
@@ -1028,10 +1030,14 @@ getOvecEntriesAt ns matchData = withForeignPtr matchData $ \matchDataPtr -> do
         (peekOvec $ n * 2)
         (peekOvec $ n * 2 + 1)
 
+-- | A whitelist for `_capturesInternal` to only get the 0th capture.
+just0th :: Maybe (NonEmpty Int)
+just0th = Just $ 0 :| []
+
 -- | Helper to create non-Template Haskell API functions.  They all take options
 -- and a pattern, and then do something via a 'Matcher'.
 withMatcher :: (Matcher -> a) -> Option -> Text -> a
-withMatcher f option patt = f $ unsafePerformIO $ mkCompiledMatcher option patt
+withMatcher f option patt = f $ unsafePerformIO $ assembleMatcher option patt
 
 -- | Match a pattern to a subject and return a list of captures, or @[]@ if no
 -- match.
@@ -1071,21 +1077,20 @@ matches = matchesOpt mempty
 
 -- | @matches = matchesOpt mempty@
 matchesOpt :: Option -> Text -> Text -> Bool
-matchesOpt option patt = has $ _capturesOpt option patt
+matchesOpt option patt = has $ _matchOpt option patt
 
--- | Match a pattern to a subject and return only the portion that matched, i.e.
--- the 0th capture.
+-- | Match a pattern to a subject and return the portion that matched in an
+-- @Alternative@, or `empty` if no match.
 match :: (Alternative f) => Text -> Text -> f Text
 match = matchOpt mempty
 
 -- | @match = matchOpt mempty@
 matchOpt :: (Alternative f) => Option -> Text -> Text -> f Text
-matchOpt = withMatcher $ \matcher ->
-    let _match = _capturesInternal matcher (Just $ 0 :| []) . _headNE
-    in maybe empty pure . preview _match
+matchOpt option patt = maybe empty pure . preview (_matchOpt option patt)
 
--- | Perform at most one substitution.
--- 
+-- | Perform at most one substitution.  See
+-- [the docs](https://pcre.org/current/doc/html/pcre2api.html#SEC36) for the
+-- special syntax of /replacement/.
 -- >>> sub "(\\w+) calling the (\\w+)" "$2 calling the $1" "the pot calling the kettle black"
 -- "the kettle calling the pot black"
 sub
@@ -1099,7 +1104,11 @@ sub = subOpt mempty
 --
 -- >>> gsub "a" "o" "apples and bananas"
 -- "opples ond bononos"
-gsub :: Text -> Text -> Text -> Text
+gsub
+    :: Text -- ^ pattern
+    -> Text -- ^ replacement
+    -> Text -- ^ subject
+    -> Text -- ^ result
 gsub = subOpt SubGlobal
 
 -- | @
@@ -1108,16 +1117,16 @@ gsub = subOpt SubGlobal
 -- @
 subOpt :: Option -> Text -> Text -> Text -> Text
 subOpt option patt replacement = snd . unsafePerformIO . subber where
-    subber = unsafePerformIO $ mkCompiledSubber replacement option patt
+    subber = unsafePerformIO $ assembleSubber replacement option patt
 
 -- | Given a pattern, produce an affine traversal (0 or 1 targets) that focuses
 -- from a subject to a potential non-empty list of captures.
 --
 -- Substitution works in the following way:  If a capture is set such that the
 -- new `Text` is not equal to the old one, a substitution occurs, otherwise it
--- doesn\'t.  This matters in cases where a capture encloses another capture
--- &mdash;notably, /all/ parenthesized captures are enclosed by the 0th capture,
--- the region of the subject matched by the whole pattern.
+-- doesn\'t.  This matters in cases where a capture encloses another
+-- capture&#x2014;notably, /all/ parenthesized captures are enclosed by the 0th
+-- capture, the region of the subject matched by the whole pattern.
 --
 -- > let threeAndMiddle = _captures ". (.) ."
 -- > print $ set threeAndMiddle ("A A A" :| ["B"]) "A A A" -- "A B A"
@@ -1144,6 +1153,16 @@ _captures = _capturesOpt mempty
 -- | @_captures = _capturesOpt mempty@
 _capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
 _capturesOpt = withMatcher $ \matcher -> _capturesInternal matcher Nothing
+
+-- | Given a pattern, produce an affine traversal (0 or 1 targets) that focuses
+-- from a subject to the portion of it that matches.
+_match :: Text -> Traversal' Text Text
+_match = _matchOpt mempty
+
+-- | @_match = _matchOpt mempty@
+_matchOpt :: Option -> Text -> Traversal' Text Text
+_matchOpt = withMatcher $ \matcher ->
+    _capturesInternal matcher just0th . _headNE
 
 -- * Support for Template Haskell compile-time regex analysis
 
@@ -1341,7 +1360,7 @@ defaultDepthLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_DEPTHLIMIT
 defaultHeapLimit :: Int
 defaultHeapLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_HEAPLIMIT
 
--- | Provided here for completeness.
+-- | Was PCRE2 built with JIT support?
 supportsJit :: Bool
 supportsJit = getConfigNumeric pcre2_CONFIG_JIT == 1
 
@@ -1378,7 +1397,7 @@ defaultTablesLength = fromIntegral $ getConfigNumeric pcre2_CONFIG_TABLES_LENGTH
 unicodeVersion :: Text
 unicodeVersion = fromJust $ getConfigString pcre2_CONFIG_UNICODE_VERSION
 
--- | Is Unicode supported?
+-- | Was PCRE2 built with Unicode support?
 supportsUnicode :: Bool
 supportsUnicode = getConfigNumeric pcre2_CONFIG_UNICODE == 1
 

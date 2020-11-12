@@ -1,3 +1,5 @@
+// Copied per the PCRE2 source's NON-AUTOTOOLS-BUILD instructions.
+
 /*************************************************
 *       Perl-Compatible Regular Expressions      *
 *************************************************/

@@ -34,7 +34,7 @@ memoMatcher patt = unsafePerformIO $ do
     case Map.lookup patt cache of
         Just matcher -> return matcher
         Nothing      -> do
-            let matcher = unsafePerformIO $ mkCompiledMatcher mempty patt
+            let matcher = unsafePerformIO $ assembleMatcher mempty patt
             atomicModifyIORef' globalMatcherCache $ \cache ->
                 (Map.insert patt matcher cache, ())
             return matcher

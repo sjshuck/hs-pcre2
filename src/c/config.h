@@ -1,4 +1,4 @@
-// Copied and edited per pcre2/NON-AUTOTOOLS-BUILD.
+// Copied and edited per the PCRE2 source's NON-AUTOTOOLS-BUILD instructions.
 
 /* PCRE2 is written in Standard C, but there are a few non-standard things it
 can cope with, allowing it to run on SunOS4 and other "close to standard"

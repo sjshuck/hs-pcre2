@@ -2,6 +2,7 @@ name:                pcre2
 version:             0.1.0.0
 github:              "sjshuck/hs-pcre2"
 license:             Apache-2.0
+license-files:       [LICENSE, src/c/pcre2/LICENCE]
 author:              "Shlomo Shuck"
 maintainer:          "stevenjshuck@gmail.com"
 copyright:           "2020 Shlomo Shuck"
