@@ -3,7 +3,6 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -152,8 +151,8 @@ type Subber = Text -> IO (CInt, Text)
 
 -- ** Options
 
--- | A single `Monoid` type representing nearly every facility PCRE2 presents
--- for tweaking the behavior of regex compilation and execution.
+-- | A `Monoid` representing nearly every facility PCRE2 presents for tweaking
+-- the behavior of regex compilation and execution.
 --
 -- All library functions that take options have the suffix @Opt@ in their names;
 -- for each of them, there\'s also a non-@Opt@ convenience function that simply
@@ -212,7 +211,7 @@ data Option
     -- internal counter (default given by `defaultMatchLimit`), as a simple CPU
     -- throttle.  Equivalent to @(*LIMIT_MATCH=@/number/@)@.
     | MatchLine -- ^ Only match complete lines.  Equivalent to bracketing the
-    -- pattern with @^(?:@pattern@)$@.
+    -- pattern with @^(?:@/pattern/@)$@.
     | MatchUnsetBackRef -- ^ A backreference to an unset capture group matches
     -- an empty string.
     | MatchWord -- ^ Only match subjects that have word boundaries at the
@@ -394,8 +393,8 @@ data CalloutResult
 -- what happens next in the substitution.
 data SubCalloutResult
     = SubCalloutAccept -- ^ Succeed, and keep going if in global mode.
-    | SubCalloutSkip -- ^ Do not perform this substitution, but keep going if
-    -- in global mode.
+    | SubCalloutSkip -- ^ Do not perform this substitution, but keep going if in
+    -- global mode.
     | SubCalloutAbort -- ^ Do not perform this or any subsequent substitutions.
     deriving (Show, Eq)
 
@@ -1049,21 +1048,13 @@ capturesOpt :: Option -> Text -> Text -> [Text]
 capturesOpt option patt = view $ _capturesOpt option patt . to NE.toList
 
 -- | Match a pattern to a subject and return a non-empty list of captures in an
--- `Alternative`, or `empty` if no match.  Typically the @Alternative@ instance
--- will be `Maybe`, but other useful ones exist, notably `STM` and those of the
--- various parser combinator libraries.
+-- `Alternative`, or `empty` if no match.  The non-empty list constructor `:|`
+-- serves as a cue to differentiate the 0th capture from the others:
 --
 -- > let parseDate = capturesA "(\\d{4})-(\\d{2})-(\\d{2})"
 -- > in case parseDate "submitted 2020-10-20" of
 -- >     Just (date :| [y, m, d]) -> ...
 -- >     Nothing                  -> putStrLn "didn't match"
---
--- Note that PCRE2 errors are distinct from match failures and are not
--- represented as `empty`; they are thrown purely as `SomePcre2Exception`s.
--- Returning @IO (NonEmpty Text)@ from this function will not enable you to
--- catch them; you must `evaluate` the results:
---
--- > (badRegex "subject" >>= evaluate) `catch` \(e :: SomePcre2Exception) -> ...
 capturesA :: (Alternative f) => Text -> Text -> f (NonEmpty Text)
 capturesA = capturesOptA mempty
 
@@ -1080,7 +1071,16 @@ matchesOpt :: Option -> Text -> Text -> Bool
 matchesOpt option patt = has $ _matchOpt option patt
 
 -- | Match a pattern to a subject and return the portion that matched in an
--- @Alternative@, or `empty` if no match.
+-- @Alternative@, or `empty` if no match.  Typically the @Alternative@ instance
+-- will be `Maybe`, but other useful ones exist, notably `STM` and those of the
+-- various parser combinator libraries.
+--
+-- Note that returning @IO Text@ from this function will not enable you to catch
+-- pure PCRE2 errors; you must evaluate the results:
+--
+-- @
+-- (match \")(\" \"whoops\" >>= `evaluate`) \``catch`\` \\(e :: `SomePcre2Exception`) -> ...
+-- @
 match :: (Alternative f) => Text -> Text -> f Text
 match = matchOpt mempty
 
@@ -1105,11 +1105,7 @@ sub = subOpt mempty
 --
 -- >>> gsub "a" "o" "apples and bananas"
 -- "opples ond bononos"
-gsub
-    :: Text -- ^ pattern
-    -> Text -- ^ replacement
-    -> Text -- ^ subject
-    -> Text -- ^ result
+gsub :: Text -> Text -> Text -> Text
 gsub = subOpt SubGlobal
 
 -- | @
@@ -1126,25 +1122,28 @@ subOpt option patt replacement = snd . unsafePerformIO . subber where
 -- Substitution works in the following way:  If a capture is set such that the
 -- new `Text` is not equal to the old one, a substitution occurs, otherwise it
 -- doesn\'t.  This matters in cases where a capture encloses another
--- capture&#x2014;notably, /all/ parenthesized captures are enclosed by the 0th
--- capture, the region of the subject matched by the whole pattern.
+-- capture&#x2014;notably, /all/ parenthesized captures are enclosed by the 0th.
 --
--- > let threeAndMiddle = _captures ". (.) ."
--- > print $ set threeAndMiddle ("A A A" :| ["B"]) "A A A" -- "A B A"
--- > print $ set threeAndMiddle ("A B A" :| ["A"]) "A A A" -- "A B A"
+-- >>> threeAndMiddle = _captures ". (.) ."
+-- >>> "A A A" & threeAndMiddle .~ "A A A" :| ["B"]
+-- "A B A"
+-- >>> "A A A" & threeAndMiddle .~ "A B A" :| ["A"]
+-- "A B A"
 --
--- Changing multiple overlapping captures is unsupported and won\'t do what you
--- want.
+-- Changing multiple overlapping captures won\'t do what you want and is
+-- unsupported.
 --
 -- If the list becomes longer for some reason, the extra elements are ignored.
 -- If it\'s shortened, the absent elements are considered to be unchanged.
 --
 -- It's recommended that the list be modified capture-wise, using @ix@.
 --
+-- > let madlibs = _captures "(\\w+) my (\\w+)"
+-- >
 -- > print $ "Well bust my buttons!" &~ do
--- >     zoom [|_re|(\w+) my (\w+)|] $ do
--- >         _capture @1 . _head .= 'd'
--- >         _capture @2 %= Text.reverse
+-- >     zoom madlibs $ do
+-- >         ix 1 . _head .= 'd'
+-- >         ix 2 %= Text.reverse
 -- >     _last .= '?'
 -- >
 -- > -- "Well dust my snottub?"
@@ -1157,6 +1156,8 @@ _capturesOpt = withMatcher $ \matcher -> _capturesInternal matcher Nothing
 
 -- | Given a pattern, produce an affine traversal (0 or 1 targets) that focuses
 -- from a subject to the portion of it that matches.
+-- 
+-- Equivalent to @\\patt -> `_captures` patt . ix 0@, but more efficient.
 _match :: Text -> Traversal' Text Text
 _match = _matchOpt mempty
 
@@ -1247,7 +1248,7 @@ capture = view $ _capture @i
 -- > {-# LANGUAGE TypeApplications #-}
 -- >
 -- > main :: IO ()
--- > main = case [re|(\S+)\s*(?<middle>\S+)|] "foo bar baz" of
+-- > main = case [regex|(\S+)\s*(?<middle>\S+)|] "foo bar baz" of
 -- >     Nothing -> error "Doesn't match"
 -- >     Just cs -> do
 -- >         print $ capture @"middle" cs              -- "bar"
@@ -1338,9 +1339,9 @@ getConfigString what = unsafePerformIO $ do
     if len == pcre2_ERROR_BADOPTION
         then return Nothing
         -- FIXME Do we really need "+ 1" here?
-        else fmap Just $ allocaBytes (fromIntegral (len + 1) * 2) $ \ptr -> do
+        else allocaBytes (fromIntegral (len + 1) * 2) $ \ptr -> do
             pcre2_config what ptr
-            Text.fromPtr ptr (fromIntegral len - 1)
+            Just <$> Text.fromPtr ptr (fromIntegral len - 1)
 
 -- | See `Bsr`.
 defaultBsr :: Bsr
@@ -1397,8 +1398,8 @@ defaultTablesLength = fromIntegral $ getConfigNumeric pcre2_CONFIG_TABLES_LENGTH
 -- | Unicode version string such as @8.0.0@, if Unicode is supported at all.
 unicodeVersion :: Maybe Text
 unicodeVersion = case getConfigString pcre2_CONFIG_UNICODE_VERSION of
-    Just "Unicode not supported" -> Nothing
-    v                            -> v
+    Just v | Text.unpack v == "Unicode not supported" -> Nothing
+    maybeV                                            -> maybeV
 
 -- | Was PCRE2 built with Unicode support?
 supportsUnicode :: Bool
@@ -1407,4 +1408,6 @@ supportsUnicode = getConfigNumeric pcre2_CONFIG_UNICODE == 1
 -- | Version of the built-in C library.  The versioning scheme is that PCRE
 -- legacy is 8.x and PCRE2 is 10.x, so this should be @10.@/something/.
 pcreVersion :: Text
-pcreVersion = fromJust $ getConfigString pcre2_CONFIG_VERSION
+pcreVersion = case getConfigString pcre2_CONFIG_VERSION of
+    Just v  -> v
+    Nothing -> error "pcreVersion: unable to get string"

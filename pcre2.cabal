@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 01b6074e0067b105d6446f2d73c69012cc2d79e08dbdfafd3ceabb50901647d1
+-- hash: e9844f2103641f1d3fc79c77cd4a9af4ad69ff5473dfa840f6f1cd21d2a49e9a
 
 name:           pcre2
 version:        0.1.0.0
@@ -17,7 +17,8 @@ author:         Shlomo Shuck
 maintainer:     stevenjshuck@gmail.com
 copyright:      2020 Shlomo Shuck
 license:        Apache-2.0
-license-file:   LICENSE
+license-files:  LICENSE,
+                src/c/pcre2/LICENCE
 build-type:     Simple
 extra-source-files:
     README.md

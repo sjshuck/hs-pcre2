@@ -59,8 +59,8 @@ capturesInfoQ s = do
     -- '(3, '[ '("foo", 1), '("bar", 2)])
     promotedTupleT 2 `appT` hi `appT` kvs
 
-re :: QuasiQuoter
-re = QuasiQuoter {
+regex :: QuasiQuoter
+regex = QuasiQuoter {
     quoteExp = \s -> [e|
         let wrap cs = Captures cs :: Captures $(capturesInfoQ s)
             maybeCaptures = preview $ _capturesInternal $(matcherQ s) Nothing
@@ -85,19 +85,19 @@ re = QuasiQuoter {
                 e = [e| view $ $(_csQ) . to NE.toList |]
                 p = listP $ map (varP . mkName . Text.unpack) $ NE.toList names,
 
-    quoteType = const $ fail "re: cannot produce a type",
+    quoteType = const $ fail "regex: cannot produce a type",
 
-    quoteDec = const $ fail "re: cannot produce declarations"}
+    quoteDec = const $ fail "regex: cannot produce declarations"}
 
-_re :: QuasiQuoter
-_re = QuasiQuoter {
+_regex :: QuasiQuoter
+_regex = QuasiQuoter {
     quoteExp = \s -> [e|
         let wrapped :: Lens' (NonEmpty Text) (Captures $(capturesInfoQ s))
             wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
         in _capturesInternal $(matcherQ s) Nothing . wrapped |],
 
-    quotePat = const $ fail "_re: cannot produce a pattern",
+    quotePat = const $ fail "_regex: cannot produce a pattern",
 
-    quoteType = const $ fail "_re: cannot produce a type",
+    quoteType = const $ fail "_regex: cannot produce a type",
 
-    quoteDec = const $ fail "_re: cannot produce declarations"}
+    quoteDec = const $ fail "_regex: cannot produce declarations"}
