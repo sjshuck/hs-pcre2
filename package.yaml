@@ -11,7 +11,7 @@ extra-source-files:
 - README.md
 - ChangeLog.md
 
-synopsis:            Haskell interface to the PCRE2 C library (included)
+synopsis:            Regular expressions via the PCRE2 C library (included)
 category:            Text
 
 # To avoid duplicated efforts in documentation and dealing with the
@@ -81,3 +81,6 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - pcre2
+
+    - hspec
+    - microlens-platform

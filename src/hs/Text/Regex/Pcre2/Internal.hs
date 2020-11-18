@@ -274,6 +274,11 @@ data Option
     -- argument.  Returning @False@ aborts pattern compilation with an
     -- exception.  Multiples of this option before the rightmost are ignored.
     --
+    -- /NOTE: Currently (PCRE2 version 10\.35) patterns seem to be parsed in two
+    -- passes, both times triggering the recursion guard.  Also, it is triggered
+    -- at the beginning of the pattern, passing 0.  None of this is documented;
+    -- expect the unexpected in the presence of side effects!/
+    --
     -- /NOTE: The guard is run via `unsafePerformIO` within pure code!/
     | UnsafeSubCallout (SubCalloutInfo -> IO SubCalloutResult) -- ^ Run the
     -- given callout on every substitution.  This is at most once unless
@@ -611,17 +616,19 @@ extractCode patt (CompileEnv {..}) = do
 
             return codePtr
 
--- | Post-`Code` compilation data used in preparation for a match or
+-- | `Code` and auxiliary compiled data used in preparation for a match or
 -- substitution.  This remains constant for the lifetime of a `Matcher` or
 -- `Subber`.
 data MatchEnv = MatchEnv {
+    matchEnvCode       :: Code,
+    matchEnvOpts       :: CUInt,
     matchEnvCtx        :: Maybe MatchContext,
     matchEnvCallout    :: Maybe (CalloutInfo -> IO CalloutResult),
     matchEnvSubCallout :: Maybe (SubCalloutInfo -> IO SubCalloutResult)}
 
 -- | Prepare a matching function.
-extractMatchEnv :: ExtractOpts MatchEnv
-extractMatchEnv = do
+extractMatchEnv :: Code -> CUInt -> ExtractOpts MatchEnv
+extractMatchEnv matchEnvCode matchEnvOpts = do
     ctxUpds <- extractOptsOf _MatchContextOption
     matchEnvCtx <- if null ctxUpds
         then return Nothing
@@ -641,7 +648,7 @@ extractMatchEnv = do
 -- | Helper for @assemble*@ functions.  Basically, extract all options and help
 -- produce a function that takes a `Text` subject and does something.
 assembleSubjFun
-    :: (Code -> MatchEnv -> CUInt -> Text -> IO a)
+    :: (MatchEnv -> Text -> IO a)
     -> Option
     -> Text
     -> IO (Text -> IO a)
@@ -654,19 +661,19 @@ assembleSubjFun mkSubjFun option patt =
     extractAll = do
         compileEnv <- extractCompileEnv
         code <- extractCode patt compileEnv
-        matchEnv <- extractMatchEnv
         matchOpts <- bitOr <$> extractOptsOf _MatchOption
+        matchEnv <- extractMatchEnv code matchOpts
 
-        return $ mkSubjFun code matchEnv matchOpts
+        return $ mkSubjFun matchEnv
 
 -- | Produce a `Matcher`.
 assembleMatcher
     :: Option
     -> Text       -- ^ pattern
     -> IO Matcher
-assembleMatcher = assembleSubjFun $ \code matchEnv opts ->
+assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
     let matchTempEnvWithSubj = mkMatchTempEnv matchEnv
-    in \subject -> withForeignPtr code $ \codePtr -> do
+    in \subject -> withForeignPtr matchEnvCode $ \codePtr -> do
         matchData <- mkForeignPtr pcre2_match_data_free $
             pcre2_match_data_create_from_pattern codePtr nullPtr
 
@@ -679,7 +686,7 @@ assembleMatcher = assembleSubjFun $ \code matchEnv opts ->
                 (castCUs subjPtr)
                 (fromIntegral subjCUs)
                 0
-                opts
+                matchEnvOpts
                 matchDataPtr
                 ctxPtr
         maybeRethrow matchTempEnvRef
@@ -708,10 +715,10 @@ assembleSubber
     -> Text      -- ^ pattern
     -> IO Subber
 assembleSubber replacement =
-    assembleSubjFun $ \code firstMatchEnv opts ->
+    assembleSubjFun $ \firstMatchEnv@(MatchEnv {..}) ->
     -- Subber
     \subject ->
-    withForeignPtr code $ \codePtr ->
+    withForeignPtr matchEnvCode $ \codePtr ->
     Text.useAsPtr subject $ \subjPtr subjCUs ->
     Text.useAsPtr replacement $ \replPtr replCUs ->
     alloca $ \outLenPtr -> do
@@ -724,12 +731,12 @@ assembleSubber replacement =
                 return (result, out)
 
             run :: CUInt -> Ptr Pcre2_match_context -> PCRE2_SPTR -> IO CInt
-            run auxOpts ctxPtr outBufPtr = pcre2_substitute
+            run curOpts ctxPtr outBufPtr = pcre2_substitute
                 codePtr
                 (castCUs subjPtr)
                 (fromIntegral subjCUs)
                 0
-                (opts .|. auxOpts)
+                (matchEnvOpts .|. curOpts)
                 nullPtr
                 ctxPtr
                 (castCUs replPtr)
@@ -761,8 +768,7 @@ assembleSubber replacement =
                         -- Do not run capture callouts again.
                         matchEnvCallout = Nothing,
                         -- Do not run any substitution callouts run previously.
-                        matchEnvSubCallout =
-                            fastFwd <$> matchEnvSubCallout firstMatchEnv}
+                        matchEnvSubCallout = fastFwd <$> matchEnvSubCallout}
                     fastFwd f = \info ->
                         case subsLog IM.!? subCalloutSubsCount info of
                             Just result -> return result

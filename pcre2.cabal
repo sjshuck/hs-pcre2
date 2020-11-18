@@ -4,11 +4,11 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: e9844f2103641f1d3fc79c77cd4a9af4ad69ff5473dfa840f6f1cd21d2a49e9a
+-- hash: a3c4cf273bbe8ae0f823d71685e9b86964a42331346480adfcf60c1889d51c4d
 
 name:           pcre2
 version:        0.1.0.0
-synopsis:       Haskell interface to the PCRE2 C library (included)
+synopsis:       Regular expressions via the PCRE2 C library (included)
 description:    Please see the README on GitHub at <https://github.com/sjshuck/hs-pcre2>
 category:       Text
 homepage:       https://github.com/sjshuck/hs-pcre2#readme
@@ -91,6 +91,8 @@ test-suite pcre2-test
   build-depends:
       base >=4.7 && <5
     , containers
+    , hspec
+    , microlens-platform
     , mtl
     , pcre2
     , template-haskell

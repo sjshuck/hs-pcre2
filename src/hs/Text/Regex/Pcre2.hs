@@ -1,82 +1,89 @@
--- | /Introduction/
+-- | __Introduction__
 --
--- Atop the low-level binding to the PCRE2 C API, we present a high-level
--- interface to add regular expression capabilities to Haskell applications and
--- libraries.
+-- Atop the low-level binding to the C API, we present a high-level interface to
+-- add regular expressions to Haskell programs.
 --
--- All inputs and outputs are strict `Text`, which maps directly to how our
--- included build of PCRE2 operates on strings of 16-bit-wide code units.
+-- All input and output strings are strict `Text`, which maps directly to how
+-- PCRE2 operates on strings of 16-bit-wide code units.
 --
 -- The C API requires pattern strings to be compiled and the compiled patterns
 -- to be executed on subject strings in discrete steps.  We hide this
--- procedure, accepting pattern and subject as arguments in a single function.
+-- procedure, accepting pattern and subject as arguments in a single function:
+--
+-- > pattern -> subject -> result
+--
 -- The implementation guarantees that, when partially applied to pattern but not
 -- subject, the resulting function will
 -- [close](https://en.wikipedia.org/wiki/Closure_(computer_programming\))
--- on the underlying compiled pattern and reuse it for every subject it is
+-- on the underlying compiled object and reuse it for every subject it is
 -- subsequently applied to.
 -- 
 -- Likewise, we do not require the user to know whether a PCRE2 option is to be
 -- applied at pattern compile time or match time.  Instead we fold all possible
 -- options into a single datatype, `Option`.  Most functions have vanilla and
--- configurable variants; the latter have @Opt@ in the name and accept an
--- @Option@.
+-- configurable variants; the latter have \"@Opt@\" in the name and accept a
+-- value of this type.
 --
 -- Similar to how @head :: [a] -> a@ sacrifices totality for type simplicity,
--- we represent user errors (versus match failures) as imprecise exceptions.
--- Unlike with @head@, however, these exceptions are well-typed; moreover, we
--- offer Template Haskell facilities that can intercept some of these errors
--- at program compile time.
+-- we represent user errors as imprecise exceptions.  Unlike with @head@, these
+-- exceptions are typed (as `SomePcre2Exception`s); moreover, we offer Template
+-- Haskell facilities that can intercept some of these errors before the program
+-- is run.  (Failure to match is not considered a user error and is represented
+-- in the types.)
 --
 -- [There's more than one way to do it](https://en.wikipedia.org/wiki/There's_more_than_one_way_to_do_it)
--- with this library.  The choice between largely redundant presentations of
--- functionality&#x2014;functions versus @Traversal\'@s, type-indexed `Captures`
--- versus plain lists, string literals versus quasi-quotations, quasi-quoted
--- expressions versus quasi-quoted patterns&#x2014;is left to the user.  She will
--- observe that each advanced feature\'s additional safety, power, or
--- convenience entails additional language extensions, cognitive overhead, and
--- (for lenses) library dependencies.
+-- with this library.  The choices between functions and @Traversal\'@s,
+-- poly-kinded `Captures` and plain lists, string literals and quasi-quotations,
+-- quasi-quoted expressions and quasi-quoted patterns....These are left to the
+-- user.  She will observe that advanced features\' extra safety, power, and
+-- convenience entail additional language extensions, cognitive overhead, and
+-- (for lenses) library dependencies, so it\'s really a matter of finding the
+-- best trade-offs for her case.
 --
--- /Definitions/
+-- __Definitions__
 --
--- * __Pattern__.  The string defining a regular expression.  Refer to syntax
+-- * /Pattern/.  The string defining a regular expression.  Refer to syntax
 -- [here](https://pcre.org/current/doc/html/pcre2pattern.html).
 --
--- * __Subject__.  The string the compiled regular expression is executed on.
+-- * /Subject/.  The string the compiled regular expression is executed on.
 --
--- * __Regex__.  A function of the form @`Text` -> result@, where the argument
--- is the subject.  (Lens users:  A regex has the more abstract form
--- @Traversal\' `Text` result@, but the concept is the same.)
+-- * /Regex/.  A function of the form @`Text` -> result@, where the argument
+-- is the subject.  It is \"compiled\" via partial application as discussed
+-- above.  (Lens users:  A regex has the more abstract form @Traversal\' `Text`
+-- result@, but the concept is the same.)
 --
--- * __Capture__ (or __capture group__).  Any substrings of the subject matched
+-- * /Capture/ (or /capture group/).  Any substrings of the subject matched
 -- by the pattern, meaning the whole pattern and any parenthesized groupings.
 -- The PCRE2 docs do not refer to the former as a \"capture\"; however it is
 -- accessed the same way in the C API, just with index 0, so we will consider it
--- the 0th capture for consistency.  Parenthesized captures are numbered from 1
--- in order of appearence of @(@.
+-- the 0th capture for consistency.  Parenthesized captures are numbered from 1.
 --
--- * __Named capture__.  A parenthesized capture can be named @foo@ like this:
+-- * /Named capture/.  A parenthesized capture can be named @foo@ like this:
 -- @(?\<foo\>...)@.  Whether they have names or not, captures are always
 -- implicitly numbered as described above.
 --
--- /Performance/
+-- __Performance__
 --
--- As discussed above, each API function is designed such that, when partially
--- applied to produce a regex, the underlying C data compiled from the pattern
--- and any options are reused for that regex\'s lifetime.  It is recommended to
--- create regexes as top-level values or else store them in a partially applied
--- state:
+-- Each API function is designed such that, when a regex is obtained, the
+-- underlying C data generated from the pattern and any options is reused for
+-- that regex\'s lifetime.  Care should be taken that the same regex is not
+-- recreated /ex nihilo/ and discarded for each new subject:
 --
--- > serverGroups :: [(Text, Text -> Bool)]
--- > serverGroups = [
--- >     ("Hadoop",     matches "hadoop|hdp"),
--- >     ("Kubernetes", matches "kube|k8s"),
--- >     ("Unknown",    otherwise)]
+-- > isEmptyOrHas2Digits :: Text -> Bool
+-- > isEmptyOrHas2Digits s = Text.null s || matches "\\d{2}" s -- bad, fully applied
 --
--- This avoids forcing patterns to be recompiled via the C API for every match.
+-- Instead, store it in a partially applied state:
 --
--- Note: Template Haskell regexes are immune from this problem and may be
--- freely inlined; see below.
+-- > isEmptyOrHas2Digits :: Text -> Bool
+-- > isEmptyOrHas2Digits = (||) <$> Text.null <*> matches "\\d{2}"
+--
+-- When in doubt, always create regexes as top-level values:
+--
+-- > rdbmsFlavor :: Text -> Maybe Text
+-- > rdbmsFlavor = matchOpt Caseless "(my|ms)?sql|postgres(ql)?"
+--
+-- Note: Template Haskell regexes are immune from this problem and may be freely
+-- inlined; see below.
 module Text.Regex.Pcre2 (
     -- * Matching and substitution
 
@@ -160,7 +167,6 @@ module Text.Regex.Pcre2 (
     --
     -- * ugly\/incorrect number of backslashes in a pattern&#x2014;matching
     -- a literal backslash requires the pattern string @\"\\\\\\\\\"@
-    -- /(difficulty maintaining\/debugging)/
     --
     -- Using a combination of GHC language extensions and PCRE2 pattern
     -- introspection features, we provide a Template Haskell API to mitigate or

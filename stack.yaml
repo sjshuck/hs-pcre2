@@ -39,7 +39,10 @@ packages:
 # - git: https://github.com/commercialhaskell/stack.git
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
 #
-# extra-deps: []
+extra-deps:
+- microlens-0.4.12.0
+- microlens-ghc-0.4.13
+- microlens-platform-0.4.2
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
@@ -59,9 +62,7 @@ packages:
 # arch: x86_64
 #
 # Extra directories used by stack for building
-#extra-include-dirs: [/usr/include]
-extra-lib-dirs:
-- /usr/lib/x86_64-linux-gnu
+# extra-include-dirs: [/usr/include]
 #
 # Allow a newer minor version of GHC than the snapshot specifies
 # compiler-check: newer-minor

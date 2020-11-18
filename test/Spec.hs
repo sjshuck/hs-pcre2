@@ -1,79 +1,51 @@
-{-# LANGUAGE DataKinds #-}         -- exp
-{-# LANGUAGE OverloadedStrings #-} -- exp & pat
-{-# LANGUAGE QuasiQuotes #-}       -- exp & pat
-{-# LANGUAGE TemplateHaskell #-}   -- exp & pat
-{-# LANGUAGE TypeApplications #-}  -- exp
-{-# LANGUAGE TypeOperators #-}     -- exp
-{-# LANGUAGE ViewPatterns #-}      --       pat
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
+-- {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Main where
 
-import           Data.Function             ((&))
-import           Data.Functor.Const        (Const(..))
-import           Data.Text                 (Text)
-import qualified Data.Text                 as Text
-import           Text.Regex.Pcre2.Internal
-import           Text.Regex.Pcre2.TH
-
-(^.) = flip view
-infixl 8 ^.
-
-(%~) = over
-infixr 4 %~
-
-l .~ x = l %~ const x
-infixr 4 .~
-set = (.~)
+import           Control.Exception (evaluate)
+import           Data.Functor      (void)
+import           Data.IORef
+import           Data.Text         (Text)
+import qualified Data.Text         as Text
+import           Test.Hspec
+import           Text.Regex.Pcre2
 
 main :: IO ()
-main = do
-    putStrLn $ "Tables length: " ++ show defaultTablesLength
+main = hspec $ do
+    describe "partial application" $ do
+        it "only causes one compilation" $
+            onlyCausesOneCompilation $ \option ->
+                matchesOpt option "foo"
 
-    putStrLn $ "JIT support: " ++ show supportsJit
+        it "only causes one compilation (point-free expression)" $ do
+            onlyCausesOneCompilation $ \option ->
+                (||) <$> Text.null <*> matchesOpt option "foo"
+    
+    describe "basic matching functions" $ do
+        it "is a start" $
+            capturesOpt Caseless "a(b)?(c)" "ac"
+                `shouldBe` ["ac", "c"]
 
-    case "foo bar baz" of
-        [re|\s+(?<middle>\S+)|] -> print middle
-        subject                 -> error $ show subject ++ " doesn't match"
+onlyCausesOneCompilation :: (Option -> Text -> a) -> Expectation
+onlyCausesOneCompilation regexWithOpt = do
+    counter <- newIORef (0 :: Int)
+    let option = UnsafeCompileRecGuard $ \_ -> do
+            modifyIORef counter (+ 1)
+            return True
+        run = void . evaluate . regexWithOpt option
+        getCount = readIORef counter
 
-    case "shump" of
-        [re|hum|] -> print True
-        _         -> print False
+    run "foo"
+    countAfterOnce <- getCount
+    countAfterOnce `shouldSatisfy` (> 0) -- probably 2!
 
-    case [re|\s+(?<middle>\S+)|] "foo bar baz" of
-        Just cs -> print (capture @"middle" cs) >> print (capture @1 cs)
-        Nothing -> error "Doesn't match"
-
-    print $ "foo bar baz"
-        & [_re|\s+(?<middle>\S+)|] . _capture @"middle" %~ Text.reverse
-
-    print $ "alter-cocker"
-        & [_re|\s+(?<middle>\S+)|] . _capture @"middle" %~ Text.reverse
-
-    print $ "The pot calling the kettle black"
-        & [_re|[Tt]he (\S+).*?the (\S+)|] %~ \cs -> cs
-            & _capture @1 .~ cs ^. _capture @2
-            & _capture @2 .~ cs ^. _capture @1
-
-    print $ "The pot calling the kettle black"
-        & [_re|[Tt]he (\S+).*?the (\S+)|] %~ do
-            c1 <- capture @1
-            c2 <- capture @2
-            set (_capture @2) c1 . set (_capture @1) c2
-
-    let flippy = sub "a" "o"
-    print $ flippy "apples and bananas"
-
-    let myOpts = mconcat [
-            SubGlobal,
-            UnsafeCallout $ \info -> do
-                print info
-                return CalloutProceed,
-            UnsafeSubCallout $ \info -> do
-                print info
-                if subCalloutSubsCount info `div` 2 == 0
-                    then return SubCalloutSkip
-                    else return SubCalloutAccept,
-            UnsafeCompileRecGuard $ \i -> print i >> return True]
-        flippier = subOpt myOpts "(?C1)(a)(?C'xyz')" "o-------------"
-
-    print $ flippier "apples and bananas"
+    run "bar"
+    run "baz"
+    countAfterTwiceMore <- getCount
+    countAfterTwiceMore `shouldBe` countAfterOnce
