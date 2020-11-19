@@ -98,11 +98,14 @@ data SliceRange = SliceRange
     {-# UNPACK #-} !Text.I16
     {-# UNPACK #-} !Text.I16
 
--- | Zero-copy slice a 'Text'.
+-- | Zero-copy slice a 'Text'.  An unset capture is represented by a
+-- `pcre2_UNSET` range and is interpreted in this library as `Text.empty`.
 thinSlice :: Text -> SliceRange -> Text
-thinSlice text (SliceRange off offEnd) = text
-    & Text.dropWord16 off
-    & Text.takeWord16 (offEnd - off)
+thinSlice text (SliceRange off offEnd)
+    | off == fromIntegral pcre2_UNSET = Text.empty
+    | otherwise                       = text
+        & Text.dropWord16 off
+        & Text.takeWord16 (offEnd - off)
 
 -- | Slice a 'Text', copying if it\'s less than half of the original.
 slice :: Text -> SliceRange -> Text
@@ -343,20 +346,6 @@ newlineToC NewlineAny     = pcre2_NEWLINE_ANY
 newlineToC NewlineAnyCrlf = pcre2_NEWLINE_ANYCRLF
 newlineToC NewlineNul     = pcre2_NEWLINE_NUL
 
--- | Input for user-defined substitution callouts.
-data SubCalloutInfo
-    = SubCalloutInfo {
-        -- | The 1-based index of which substitution we\'re on.  Only goes past
-        -- 1 during global substitutions.
-        subCalloutSubsCount :: Int,
-        -- | The captures that have been set so far.
-        subCalloutCaptures :: NonEmpty (Maybe Text),
-        -- | The original subject.
-        subCalloutSubject :: Text,
-        -- | The replacement.
-        subCalloutReplacement :: Text}
-    deriving (Show, Eq)
-
 -- | Input for user-defined callouts.
 data CalloutInfo
     = CalloutInfo {
@@ -392,6 +381,20 @@ data CalloutResult
     | CalloutNoMatchHere -- ^ Fail the current capture, but not the whole match.
     -- For example, backtracking may occur.
     | CalloutNoMatch -- ^ Fail the whole match.
+    deriving (Show, Eq)
+
+-- | Input for user-defined substitution callouts.
+data SubCalloutInfo
+    = SubCalloutInfo {
+        -- | The 1-based index of which substitution we\'re on.  Only goes past
+        -- 1 during global substitutions.
+        subCalloutSubsCount :: Int,
+        -- | The captures that have been set so far.
+        subCalloutCaptures :: NonEmpty (Maybe Text),
+        -- | The original subject.
+        subCalloutSubject :: Text,
+        -- | The replacement.
+        subCalloutReplacement :: Text}
     deriving (Show, Eq)
 
 -- | Substitution callout functions return one of these values, which dictates
@@ -627,12 +630,13 @@ data MatchEnv = MatchEnv {
     matchEnvSubCallout :: Maybe (SubCalloutInfo -> IO SubCalloutResult)}
 
 -- | Prepare a matching function.
-extractMatchEnv :: Code -> CUInt -> ExtractOpts MatchEnv
-extractMatchEnv matchEnvCode matchEnvOpts = do
-    ctxUpds <- extractOptsOf _MatchContextOption
-    matchEnvCtx <- if null ctxUpds
-        then return Nothing
-        else liftIO $ Just <$> do
+extractMatchEnv :: Code -> ExtractOpts MatchEnv
+extractMatchEnv matchEnvCode = do
+    matchEnvOpts <- bitOr <$> extractOptsOf _MatchOption
+
+    matchEnvCtx <- extractOptsOf _MatchContextOption >>= \case
+        []      -> return Nothing
+        ctxUpds -> liftIO $ Just <$> do
             ctx <- mkForeignPtr pcre2_match_context_free $
                 pcre2_match_context_create nullPtr
 
@@ -661,8 +665,7 @@ assembleSubjFun mkSubjFun option patt =
     extractAll = do
         compileEnv <- extractCompileEnv
         code <- extractCode patt compileEnv
-        matchOpts <- bitOr <$> extractOptsOf _MatchOption
-        matchEnv <- extractMatchEnv code matchOpts
+        matchEnv <- extractMatchEnv code
 
         return $ mkSubjFun matchEnv
 
@@ -983,15 +986,12 @@ maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
 -- @Setter'@ to perform substitutions at the Haskell level.
 --
 -- When any capture is forced, all captures are forced in order to GC C data
--- more promptly.  When we need _some_ captures but not _all_ captures, we can
+-- more promptly.  When we need /some/ captures but not /all/ captures, we can
 -- pass in a whitelist of the numbers of captures we want, thereby avoiding
 -- unnecessary allocations.
 --
 -- Internal only!  Users should not (have to) know about `Matcher`.
-_capturesInternal
-    :: Matcher
-    -> Maybe (NonEmpty Int) -- ^ whitelist (@Nothing@ means retrieve all)
-    -> Traversal' Text (NonEmpty Text)
+_capturesInternal :: Matcher -> [Int] -> Traversal' Text (NonEmpty Text)
 _capturesInternal matcher whitelist f subject
     | result == pcre2_ERROR_NOMATCH = pure subject
     | result <= 0                   = throw $ Pcre2Exception result
@@ -1004,9 +1004,8 @@ _capturesInternal matcher whitelist f subject
     where
 
     (result, matchData) = unsafePerformIO $ matcher subject
-    ovecEntries = unsafePerformIO $ getOvecEntriesAt ns matchData
     cs = unsafePerformIO $ forM ovecEntries $ evaluate . slice subject
-    ns = fromMaybe (0 :| [1 .. fromIntegral result - 1]) whitelist
+    ovecEntries = unsafePerformIO $ getOvecEntriesAt whitelist matchData
 
     mkSegments ((SliceRange off offEnd, c), c') r prevOffEnd
         -- This substring is unchanged.  Keep going without making cuts.
@@ -1023,21 +1022,22 @@ _capturesInternal matcher whitelist f subject
         in [thinSlice subject (SliceRange off offEnd) | off /= offEnd]
 
 -- | Strictly read specifically indexed captures' offsets from match results.
--- Does not check if indexes are in bounds of the ovector!
-getOvecEntriesAt :: NonEmpty Int -> MatchData -> IO (NonEmpty SliceRange)
+-- Truncate indexes when they go out of bounds, to support infinite lists.
+getOvecEntriesAt :: [Int] -> MatchData -> IO (NonEmpty SliceRange)
 getOvecEntriesAt ns matchData = withForeignPtr matchData $ \matchDataPtr -> do
-    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+    count <- fromIntegral <$> pcre2_get_ovector_count matchDataPtr
 
-    let peekOvec :: Int -> IO Text.I16
-        peekOvec = fmap fromIntegral . peekElemOff ovecPtr
+    case NE.nonEmpty $ takeWhile (< count) ns of
+        Nothing -> error "BUG! Tried to get empty list of captures"
+        Just ns -> do
+            ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
 
-    forM ns $ \n -> liftM2 SliceRange
-        (peekOvec $ n * 2)
-        (peekOvec $ n * 2 + 1)
+            let peekOvec :: Int -> IO Text.I16
+                peekOvec = fmap fromIntegral . peekElemOff ovecPtr
 
--- | A whitelist for `_capturesInternal` to only get the 0th capture.
-just0th :: Maybe (NonEmpty Int)
-just0th = Just $ 0 :| []
+            forM ns $ \n -> liftM2 SliceRange
+                (peekOvec $ n * 2)
+                (peekOvec $ n * 2 + 1)
 
 -- | Helper to create non-Template Haskell API functions.  They all take options
 -- and a pattern, and then do something via a 'Matcher'.
@@ -1074,7 +1074,7 @@ matches = matchesOpt mempty
 
 -- | @matches = matchesOpt mempty@
 matchesOpt :: Option -> Text -> Text -> Bool
-matchesOpt option patt = has $ _matchOpt option patt
+matchesOpt = withMatcher $ \matcher -> has $ _capturesInternal matcher []
 
 -- | Match a pattern to a subject and return the portion that matched in an
 -- @Alternative@, or `empty` if no match.  Typically the @Alternative@ instance
@@ -1158,7 +1158,7 @@ _captures = _capturesOpt mempty
 
 -- | @_captures = _capturesOpt mempty@
 _capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
-_capturesOpt = withMatcher $ \matcher -> _capturesInternal matcher Nothing
+_capturesOpt = withMatcher $ \matcher -> _capturesInternal matcher [0 ..]
 
 -- | Given a pattern, produce an affine traversal (0 or 1 targets) that focuses
 -- from a subject to the portion of it that matches.
@@ -1169,8 +1169,7 @@ _match = _matchOpt mempty
 
 -- | @_match = _matchOpt mempty@
 _matchOpt :: Option -> Text -> Traversal' Text Text
-_matchOpt = withMatcher $ \matcher ->
-    _capturesInternal matcher just0th . _headNE
+_matchOpt = withMatcher $ \matcher -> _capturesInternal matcher [0] . _headNE
 
 -- * Support for Template Haskell compile-time regex analysis
 
@@ -1203,9 +1202,9 @@ getCaptureNames codePtr = do
             (fromIntegral groupNameLen)
         return (fromIntegral groupNumber, groupName)
 
-    captureCount <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
+    hiCaptNum <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
 
-    return $ map (names IM.!?) [0 .. fromIntegral captureCount]
+    return $ map (names IM.!?) [0 .. fromIntegral hiCaptNum]
 
 -- | Low-level access to compiled pattern info, per the docs.
 getCodeInfo :: (Storable a) => Ptr Pcre2_code -> CUInt -> IO a
@@ -1296,7 +1295,7 @@ instance Exception SomePcre2Exception
 -- library.
 newtype Pcre2Exception = Pcre2Exception CInt
 instance Show Pcre2Exception where
-    show (Pcre2Exception x) = Text.unpack $ getErrorMessage x
+    show (Pcre2Exception x) = "pcre2: " ++ Text.unpack (getErrorMessage x)
 instance Exception Pcre2Exception where
     toException = toException . SomePcre2Exception
     fromException = fromException >=> \(SomePcre2Exception e) -> cast e

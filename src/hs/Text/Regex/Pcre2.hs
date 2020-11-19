@@ -74,13 +74,14 @@
 --
 -- Instead, store it in a partially applied state:
 --
--- > isEmptyOrHas2Digits :: Text -> Bool
 -- > isEmptyOrHas2Digits = (||) <$> Text.null <*> matches "\\d{2}"
 --
 -- When in doubt, always create regexes as top-level values:
 --
--- > rdbmsFlavor :: Text -> Maybe Text
--- > rdbmsFlavor = matchOpt Caseless "(my|ms)?sql|postgres(ql)?"
+-- > has2Digits :: Text -> Bool
+-- > has2Digits = matches "\\d{2}"
+-- >
+-- > isEmptyOrHas2Digits s = Text.null s || has2Digits s -- OK
 --
 -- Note: Template Haskell regexes are immune from this problem and may be freely
 -- inlined; see below.

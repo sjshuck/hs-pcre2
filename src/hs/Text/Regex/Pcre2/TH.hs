@@ -63,27 +63,27 @@ regex :: QuasiQuoter
 regex = QuasiQuoter {
     quoteExp = \s -> [e|
         let wrap cs = Captures cs :: Captures $(capturesInfoQ s)
-            maybeCaptures = preview $ _capturesInternal $(matcherQ s) Nothing
+            maybeCaptures = preview $ _capturesInternal $(matcherQ s) [0 ..]
         in maybe empty (pure . wrap) . maybeCaptures |],
 
     quotePat = \s -> do
         captureNames <- predictCaptureNamesQ s
 
-        case NE.nonEmpty $ toKVs captureNames of
+        case toKVs captureNames of
             -- No named captures.  Test whether the string matches without
             -- creating any new Text values.
-            Nothing -> viewP
-                [e| has $ _capturesInternal $(matcherQ s) Nothing |]
+            [] -> viewP
+                [e| has $ _capturesInternal $(matcherQ s) [] |]
                 [p| True |]
 
             -- One or more named captures.  Attempt to bind only those to local
             -- variables of the same names.
-            Just numberedNames -> viewP e p where
-                (numbers, names) = NE.unzip numberedNames
-                whitelistQ = liftData $ Just numbers
+            numberedNames -> viewP e p where
+                (numbers, names) = unzip numberedNames
+                whitelistQ = liftData numbers
                 _csQ = [e| _capturesInternal $(matcherQ s) $(whitelistQ) |]
                 e = [e| view $ $(_csQ) . to NE.toList |]
-                p = listP $ map (varP . mkName . Text.unpack) $ NE.toList names,
+                p = listP $ map (varP . mkName . Text.unpack) names,
 
     quoteType = const $ fail "regex: cannot produce a type",
 
@@ -94,7 +94,7 @@ _regex = QuasiQuoter {
     quoteExp = \s -> [e|
         let wrapped :: Lens' (NonEmpty Text) (Captures $(capturesInfoQ s))
             wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
-        in _capturesInternal $(matcherQ s) Nothing . wrapped |],
+        in _capturesInternal $(matcherQ s) [0 ..] . wrapped |],
 
     quotePat = const $ fail "_regex: cannot produce a pattern",
 
