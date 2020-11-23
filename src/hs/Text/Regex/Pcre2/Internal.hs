@@ -259,10 +259,10 @@ data Option
     | SubReplacementOnly -- ^ /Affects `subOpt`./  Return just the rendered
     -- replacement instead of it within the subject.  With `SubGlobal`, all
     -- results are concatenated.
-    | SubUnknownEmpty -- ^ /Affects `subOpt`./  References in the replacement
-    -- to non-existent captures don\'t error but evaluate to the empty string.
-    -- This is a pretty dubious move by me.  You should open a ticket and ask me
-    -- to remove it.
+    | SubUnknownUnset -- ^ /Affects `subOpt`./  References in the replacement
+    -- to non-existent captures don\'t error but are treated as unset.
+    | SubUnsetEmpty -- ^ /Affects `subOpt`./  References in the replacement
+    -- to unset captures don\'t error but are treated as empty.
     | Ucp -- ^ Count Unicode characters in some character classes such as @\\d@.
     -- Incompatible with `NeverUcp`.
     | Ungreedy -- ^ Invert the effect of @?@.  Without it, quantifiers are
@@ -477,9 +477,8 @@ applyOption = \case
     SubReplacementOnly -> [MatchOption pcre2_SUBSTITUTE_REPLACEMENT_ONLY]
     SubGlobal          -> [MatchOption pcre2_SUBSTITUTE_GLOBAL]
     SubLiteral         -> [MatchOption pcre2_SUBSTITUTE_LITERAL]
-    SubUnknownEmpty    -> [
-        MatchOption pcre2_SUBSTITUTE_UNKNOWN_UNSET,
-        MatchOption pcre2_SUBSTITUTE_UNSET_EMPTY]
+    SubUnknownUnset    -> [MatchOption pcre2_SUBSTITUTE_UNKNOWN_UNSET]
+    SubUnsetEmpty      -> [MatchOption pcre2_SUBSTITUTE_UNSET_EMPTY]
 
     -- CalloutOption
     UnsafeCallout f -> [CalloutOption f]
@@ -1008,8 +1007,10 @@ _capturesInternal matcher whitelist f subject
     ovecEntries = unsafePerformIO $ getOvecEntriesAt whitelist matchData
 
     mkSegments ((SliceRange off offEnd, c), c') r prevOffEnd
-        -- This substring is unchanged.  Keep going without making cuts.
-        | c == c'   = r prevOffEnd
+        | off == fromIntegral pcre2_UNSET || c == c' =
+            -- This substring is unset or unchanged.  Keep going without making
+            -- cuts.
+            r prevOffEnd
         | otherwise =
             -- Emit the subject up until here, and the new substring, and keep
             -- going, remembering where we are now.
@@ -1049,7 +1050,7 @@ withMatcher f option patt = f $ unsafePerformIO $ assembleMatcher option patt
 captures :: Text -> Text -> [Text]
 captures = capturesOpt mempty
 
--- | @captures = capturesOpt mempty@
+-- | @capturesOpt mempty = captures@
 capturesOpt :: Option -> Text -> Text -> [Text]
 capturesOpt option patt = view $ _capturesOpt option patt . to NE.toList
 
@@ -1064,7 +1065,7 @@ capturesOpt option patt = view $ _capturesOpt option patt . to NE.toList
 capturesA :: (Alternative f) => Text -> Text -> f (NonEmpty Text)
 capturesA = capturesOptA mempty
 
--- | @capturesA = capturesOptA mempty@
+-- | @capturesOptA mempty = capturesA@
 capturesOptA :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
 capturesOptA option patt = maybe empty pure . preview (_capturesOpt option patt)
 
@@ -1072,25 +1073,16 @@ capturesOptA option patt = maybe empty pure . preview (_capturesOpt option patt)
 matches :: Text -> Text -> Bool
 matches = matchesOpt mempty
 
--- | @matches = matchesOpt mempty@
+-- | @matchesOpt mempty = matches@
 matchesOpt :: Option -> Text -> Text -> Bool
 matchesOpt = withMatcher $ \matcher -> has $ _capturesInternal matcher []
 
 -- | Match a pattern to a subject and return the portion that matched in an
--- @Alternative@, or `empty` if no match.  Typically the @Alternative@ instance
--- will be `Maybe`, but other useful ones exist, notably `STM` and those of the
--- various parser combinator libraries.
---
--- Note that returning @IO Text@ from this function will not enable you to catch
--- pure PCRE2 errors; you must evaluate the results:
---
--- @
--- (match \")(\" \"whoops\" >>= `evaluate`) \``catch`\` \\(e :: `SomePcre2Exception`) -> ...
--- @
+-- @Alternative@, or `empty` if no match.
 match :: (Alternative f) => Text -> Text -> f Text
 match = matchOpt mempty
 
--- | @match = matchOpt mempty@
+-- | @matchOpt mempty = match@
 matchOpt :: (Alternative f) => Option -> Text -> Text -> f Text
 matchOpt option patt = maybe empty pure . preview (_matchOpt option patt)
 
@@ -1115,8 +1107,8 @@ gsub :: Text -> Text -> Text -> Text
 gsub = subOpt SubGlobal
 
 -- | @
--- sub = subOpt mempty
--- gsub = subOpt SubGlobal
+-- subOpt mempty = sub
+-- subOpt SubGlobal = gsub
 -- @
 subOpt :: Option -> Text -> Text -> Text -> Text
 subOpt option patt replacement = snd . unsafePerformIO . subber where
@@ -1138,6 +1130,11 @@ subOpt option patt replacement = snd . unsafePerformIO . subber where
 --
 -- Changing multiple overlapping captures won\'t do what you want and is
 -- unsupported.
+--
+-- Changing an unset capture is unsupported because the PCRE2 match API does not
+-- give subject location info about it.  Currently we ignore all such attempts.
+-- (Native substitution functions like `sub` do not have this limitation.  See
+-- also `SubUnknownUnset` and `SubUnsetEmpty`.)
 --
 -- If the list becomes longer for some reason, the extra elements are ignored.
 -- If it\'s shortened, the absent elements are considered to be unchanged.
@@ -1167,7 +1164,7 @@ _capturesOpt = withMatcher $ \matcher -> _capturesInternal matcher [0 ..]
 _match :: Text -> Traversal' Text Text
 _match = _matchOpt mempty
 
--- | @_match = _matchOpt mempty@
+-- | @_matchOpt mempty = _match@
 _matchOpt :: Option -> Text -> Traversal' Text Text
 _matchOpt = withMatcher $ \matcher -> _capturesInternal matcher [0] . _headNE
 
