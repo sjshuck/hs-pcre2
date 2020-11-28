@@ -1139,7 +1139,8 @@ subOpt option patt replacement = snd . unsafePerformIO . subber where
 -- If the list becomes longer for some reason, the extra elements are ignored.
 -- If it\'s shortened, the absent elements are considered to be unchanged.
 --
--- It's recommended that the list be modified capture-wise, using @ix@.
+-- It's recommended that the list be modified capture-wise,
+-- using [@ix@](https://hackage.haskell.org/package/microlens/docs/Lens-Micro.html#v:ix).
 --
 -- > let madlibs = _captures "(\\w+) my (\\w+)"
 -- >
