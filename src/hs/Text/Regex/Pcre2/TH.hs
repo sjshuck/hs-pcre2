@@ -59,6 +59,35 @@ capturesInfoQ s = do
     -- '(3, '[ '("foo", 1), '("bar", 2)])
     promotedTupleT 2 `appT` hi `appT` kvs
 
+-- | When used as an expression, this effectively has the type
+--
+-- > regex :: (Alternative f) => String -> Text -> f (Captures info)
+--
+-- Thus, it is like `capturesA`, except instead of returning a plain @`NonEmpty`
+-- `Text`@, it returns an opaque `Captures`.  To retrieve an individual capture
+-- from this object, use `capture`.
+--
+-- > case [regex|(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})|] "submitted 2020-10-20" of
+-- >     Just cs ->
+-- >         let date = capture @0 cs
+-- >             year = read @Int $ capture @"y" cs
+-- >             ...
+--
+-- When used as a pattern, it matches when the regex matches, whereupon any
+-- named captures are bound to variables of the same name.
+--
+-- > case "submitted 2020-10-20" of
+-- >     [regex|(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})|] ->
+-- >         let year = read @Int y
+-- >             ...
+--
+-- Note that it is not possible to access the 0th capture this way.  As a
+-- workaround, explicitly capture the whole pattern string and name it.  Unnamed
+-- captures (including the 0th) do not cause `Text` values to be created
+-- wastefully, so this will not incur a performance penalty.
+--
+-- If there are no named captures, the pattern simply acts as a guard and does
+-- not bind to any variables.
 regex :: QuasiQuoter
 regex = QuasiQuoter {
     quoteExp = \s -> [e|
@@ -89,6 +118,21 @@ regex = QuasiQuoter {
 
     quoteDec = const $ fail "regex: cannot produce declarations"}
 
+-- | A lens variant of `regex`.  Can only be used as an expression.
+--
+-- > _regex :: String -> Traversal' Text (Captures info)
+--
+-- > import Control.Lens
+-- > import Data.Text.Lens
+-- >
+-- > embeddedNumber :: Traversal' String Int
+-- > embeddedNumber = packed . [_regex|\d+|] . _capture @0 . unpacked . _Show
+-- >
+-- > main :: IO ()
+-- > main = putStrLn $ "There are 14 competing standards" & embeddedNumber %~ (+ 1)
+-- >
+-- > -- There are 15 competing standards
+--
 _regex :: QuasiQuoter
 _regex = QuasiQuoter {
     quoteExp = \s -> [e|

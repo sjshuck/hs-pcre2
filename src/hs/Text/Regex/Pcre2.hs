@@ -1,5 +1,5 @@
 {-|
-__Introduction__
+/__Introduction__/
 
 Atop the low-level binding to the C API, we present a high-level interface to
 add regular expressions to Haskell programs.
@@ -9,14 +9,15 @@ operates on strings of 16-bit-wide code units.
 
 The C API requires pattern strings to be compiled and the compiled patterns to
 be executed on subject strings in discrete steps.  We hide this procedure,
-accepting pattern and subject as arguments in a single function, in basic form:
+accepting pattern and subject as arguments in a single function, essentially:
 
 > pattern -> subject -> result
 
-The implementation guarantees that, when [partially applied](https://wiki.haskell.org/Partial_application) to pattern but not
-subject, the resulting function will
-[close](https://en.wikipedia.org/wiki/Closure_(computer_programming\)) on the
-underlying compiled object and reuse it for every subject it is subsequently
+The implementation guarantees that,
+when [partially applied](https://wiki.haskell.org/Partial_application) to
+pattern but not subject, the resulting function
+will [close](https://en.wikipedia.org/wiki/Closure_(computer_programming\)) on
+the underlying compiled object and reuse it for every subject it is subsequently
 applied to.
 
 Likewise, we do not require the user to know whether a PCRE2 option is to be
@@ -40,36 +41,36 @@ advanced features\' extra safety, power, and convenience entail additional
 language extensions, cognitive overhead, and (for lenses) library dependencies,
 so it\'s really a matter of finding the best trade-offs for her case.
 
-__Definitions__
+/__Definitions__/
 
-* /Pattern/.  The string defining a regular expression.  Refer to
+[Pattern]:  The string defining a regular expression.  Refer to
 syntax [here](https://pcre.org/current/doc/html/pcre2pattern.html).
 
-* /Subject/.  The string the compiled regular expression is executed on.
+[Subject]:  The string the compiled regular expression is executed on.
 
-* /Regex/.  A function of the form @`Text` -> result@, where the argument is the
+[Regex]:  A function of the form @`Text` -> result@, where the argument is the
 subject.  It is \"compiled\" via partial application as discussed above.  (Lens
 users:  A regex has the more abstract form
 @[Traversal\'](https://hackage.haskell.org/package/microlens/docs/Lens-Micro.html#t:Traversal-39-)
 `Text` result@, but the concept is the same.)
 
-* /Capture/ (or /capture group/).  Any substrings of the subject matched by the
+[Capture (or capture group)]:  Any substrings of the subject matched by the
 pattern, meaning the whole pattern and any parenthesized groupings.  The PCRE2
 docs do not refer to the former as a \"capture\"; however it is accessed the
 same way in the C API, just with index 0, so we will consider it the 0th capture
 for consistency.  Parenthesized captures are implicitly numbered from 1.
 
-* /Unset capture/.  A capture considered unset as distinct from empty.  This can
+[Unset capture]:  A capture considered unset as distinct from empty.  This can
 arise from matching the pattern @(a)?@ to an empty subject&#x2014;the 0th
 capture will be set as empty, but the 1st will be unset altogether.  We
 represent both as empty `Text` for simplicity.  See below for discussions about
 how unset captures may be detected or substituted using this library.
 
-* /Named capture/.  A parenthesized capture can be named @foo@ like this:
+[Named capture]:  A parenthesized capture can be named like this:
 @(?\<foo\>...)@.  Whether they have names or not, captures are always numbered
 as described above.
 
-__Performance__
+/__Performance__/
 
 Each API function is designed such that, when a regex is obtained, the
 underlying C data generated from the pattern and any options is reused for that
@@ -93,21 +94,22 @@ When in doubt, always create regexes as top-level values:
 Note: Template Haskell regexes are immune from this problem and may be freely
 inlined; see below.
 
-__Handling errors__
+/__Handling errors__/
 
 In a few places we use the `Alternative` typeclass to optionally return match
 results, expressing success via `pure` and failure via `empty`.  Typically the
 user will choose the instance `Maybe`, but other useful ones exist, notably
 @[STM](https://hackage.haskell.org/package/stm/docs/Control-Monad-STM.html#t:STM)@,
 that of [optparse-applicative](https://hackage.haskell.org/package/optparse-applicative/docs/Options-Applicative.html#t:Parser),
-and those of the various parser combinator libraries,
-like [megaparsec](https://hackage.haskell.org/package/megaparsec/docs/Text-Megaparsec.html#t:ParsecT).
+and those of parser combinator libraries such
+as [megaparsec](https://hackage.haskell.org/package/megaparsec/docs/Text-Megaparsec.html#t:ParsecT).
 
 By contrast, user errors are thrown purely.  If a user error is to be caught, it
 must be at the site where the function returning match or substitution
 results is fully evaluated&#x2014;in other words, wherever it is run against a
 subject.  Even pattern compile errors are deferred to match sites, due to the
-way this library internally leverages `unsafePerformIO` to implement laziness.
+way this library internally leverages `System.IO.Unsafe.unsafePerformIO` to
+implement laziness.
 
 >>> broken = match "*"
 >>> broken "foo"
@@ -115,8 +117,8 @@ way this library internally leverages `unsafePerformIO` to implement laziness.
                     *
                     ^
 
-`evaluate` comes in handy to force results into the `IO` monad in order to catch
-errors reliably:
+`Control.Exception.evaluate` comes in handy to force results into the `IO` monad
+in order to catch errors reliably:
 
 >>> evaluate (broken "foo") `catch` \(_ :: SomePcre2Exception) -> return Nothing
 Nothing
@@ -157,8 +159,8 @@ module Text.Regex.Pcre2 (
     --
     -- 2.  A library providing combinators.  For lens newcomers, it is
     -- recommended to grab
-    -- [microlens-platform](https://hackage.haskell.org/package/microlens-platform)&#x2014;all
-    -- the examples in this library work with it,
+    -- [microlens-platform](https://hackage.haskell.org/package/microlens-platform)&#x2014;most
+    -- of the examples in this library work with it,
     -- @[packed](https://hackage.haskell.org/package/microlens-platform/docs/Lens-Micro-Platform.html#v:packed)@
     -- and
     -- @[unpacked](https://hackage.haskell.org/package/microlens-platform/docs/Lens-Micro-Platform.html#v:packed)@
@@ -200,24 +202,44 @@ module Text.Regex.Pcre2 (
     -- | Despite whatever virtues, the API thus far has some fragility arising
     -- from various scenarios:
     --
-    -- * malformed patterns such as mismatched parentheses /(runtime error)/
+    -- * pattern malformation such as mismatched parentheses /(runtime error)/
     --
     -- * out-of-bounds indexing of a capture group list /(runtime error)/
     --  
     -- * out-of-bounds @ix@ing of a @Traversal\'@ target
     -- /(spurious failure to match)/
     --
-    -- * a case expression containing a Haskell list pattern of the wrong length
+    -- * case expression containing a Haskell list pattern of the wrong length
     -- /(spurious failure to match)/
     --
-    -- * a regex inadvertently created inline /(suboptimal performance)/
+    -- * regex created and discarded inline /(suboptimal performance)/
     --
-    -- * ugly\/incorrect number of backslashes in a pattern&#x2014;matching
-    -- a literal backslash requires the pattern string @\"\\\\\\\\\"@
+    -- * ugly\/incorrect number of backslashes in a pattern.  Matching a literal
+    -- backslash requires the pattern @\"\\\\\\\\\"@!.
     --
-    -- Using a combination of GHC language extensions and PCRE2 pattern
-    -- introspection features, we provide a Template Haskell API to mitigate or
-    -- prevent all these scenarios.
+    -- Using a combination of language extensions and pattern introspection
+    -- features, we provide a Template Haskell API to mitigate these scenarios.
+    -- To make use of it these must be enabled:
+    --
+    -- +------------------------------+----------------------------------------+
+    -- | Extension                    | Rationale                              |
+    -- +==============================+========================================+
+    -- | @DataKinds@                  | `GHC.TypeLits.Nat`s (numbers),         |
+    -- |                              | `GHC.TypeLits.Symbol`s (strings), and  |
+    -- |                              | other type-level data powering         |
+    -- |                              | compile-time capture lookups           |
+    -- +------------------------------+----------------------------------------+
+    -- | @QuasiQuotes@                | @[@/f/@|@...@|]@ syntax                |
+    -- +------------------------------+----------------------------------------+
+    -- | @TemplateHaskell@            | Running PCRE2 at compile time and      |
+    -- |                              | generating code                        |
+    -- +------------------------------+----------------------------------------+
+    -- | @TypeApplications@           | @\@i@ syntax for supplying type index  |
+    -- |                              | arguments to applicable functions      |
+    -- +------------------------------+----------------------------------------+
+    --
+    -- The inspiration for this portion of the library is languages that support
+    -- regular expressions with [superior ergonomics baked-in](https://ruby-doc.org/core-2.7.2/Regexp.html#class-Regexp-label-Capturing).
 
     -- ** Quasi-quoters
     regex,
@@ -322,7 +344,5 @@ where
 
 import Control.Applicative       (Alternative(..))
 import Data.Text                 (Text)
-import Control.Exception         (evaluate)
-import System.IO.Unsafe          (unsafePerformIO)
 import Text.Regex.Pcre2.Internal
 import Text.Regex.Pcre2.TH

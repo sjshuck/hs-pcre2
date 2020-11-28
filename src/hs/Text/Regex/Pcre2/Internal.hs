@@ -248,11 +248,11 @@ data Option
     -- given by `defaultParensLimit`).
     | PartialHard -- ^ If the subject ends without finding a complete match,
     -- stop trying alternatives and signal a partial match immediately.
-    -- Currently we do this via throwing a `Pcre2Exception` but we should do
+    -- Currently we do this by throwing a `Pcre2Exception` but we should do
     -- better.
     | PartialSoft -- ^ If the subject ends and all alternatives have been tried,
     -- but no complete match is found, signal a partial match.  Currently we do
-    -- this via throwing a `Pcre2Exception` but we should do better.
+    -- this by throwing a `Pcre2Exception` but we should do better.
     | SubGlobal -- ^ /Affects `subOpt`./  Replace all, rather than just once.
     | SubLiteral -- ^ /Affects `subOpt`./  Treat the replacement as a literal
     -- string.
@@ -277,10 +277,10 @@ data Option
     -- argument.  Returning @False@ aborts pattern compilation with an
     -- exception.  Multiples of this option before the rightmost are ignored.
     --
-    -- /NOTE: Currently (PCRE2 version 10\.35) patterns seem to be parsed in two
-    -- passes, both times triggering the recursion guard.  Also, it is triggered
-    -- at the beginning of the pattern, passing 0.  None of this is documented;
-    -- expect the unexpected in the presence of side effects!/
+    -- /NOTE: Currently (PCRE2 version 10\.35) patterns seem to be parsed in/
+    -- /two passes, both times triggering the recursion guard.  Also, it is/
+    -- /triggered at the beginning of the pattern, passing 0.  None of this is/
+    -- /documented; expect the unexpected in the presence of side effects!/
     --
     -- /NOTE: The guard is run via `unsafePerformIO` within pure code!/
     | UnsafeSubCallout (SubCalloutInfo -> IO SubCalloutResult) -- ^ Run the
@@ -1132,9 +1132,9 @@ subOpt option patt replacement = snd . unsafePerformIO . subber where
 -- unsupported.
 --
 -- Changing an unset capture is unsupported because the PCRE2 match API does not
--- give subject location info about it.  Currently we ignore all such attempts.
--- (Native substitution functions like `sub` do not have this limitation.  See
--- also `SubUnknownUnset` and `SubUnsetEmpty`.)
+-- give location info about it.  Currently we ignore all such attempts.  (Native
+-- substitution functions like `sub` do not have this limitation.  See also
+-- `SubUnknownUnset` and `SubUnsetEmpty`.)
 --
 -- If the list becomes longer for some reason, the extra elements are ignored.
 -- If it\'s shortened, the absent elements are considered to be unchanged.
@@ -1211,11 +1211,22 @@ getCodeInfo codePtr what = alloca $ \wherePtr -> do
 
 -- | A wrapper around a list of captures that carries additional type-level
 -- information about the number and names of those captures.
+--
+-- This type is only intended to be created by
+-- `Text.Regex.Pcre2.regex`/`Text.Regex.Pcre2._regex` and consumed by
+-- `Text.Regex.Pcre2.capture`/`Text.Regex.Pcre2._capture`, leveraging type
+-- inference.  Specifying the @info@ explicitly in a type signature is not
+-- supported&#x2014;the definition of `CapturesInfo` is not part of the public
+-- API and may change without warning.
+--
+-- After obtaining `Captures` it\'s recommended to immediately consume them by
+-- accessing `Text` captures and transforming them into application-level data,
+-- to avoid leaking the types to top level and having to write signatures.  In
+-- times of need, \"@Captures _@\" may be written with the help of
+-- @{-\# LANGUAGE PartialTypeSignatures \#-}@.
 newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
 
--- | The kind of that information.
---
--- This definition is not part of the public API and may change without warning!
+-- | The kind of `Captures`.
 type CapturesInfo = (Nat, [(Symbol, Nat)])
 
 -- | Look up the number of a capture at compile time, either by number or by
@@ -1236,44 +1247,26 @@ type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
     CaptNum _ _ = TypeError
         (TypeLits.Text "Capture index must be a number (Nat) or name (Symbol)")
 
--- | Lookup a capture in a `Captures` result obtained from a Template
--- Haskell-generated matching function.  The index is verified at the type level
--- and cannot fail at runtime.
+-- | Safely lookup a capture in a `Captures` result obtained from a Template
+-- Haskell-generated matching function.
+--
+-- The ugly type signature may be interpreted like this:  /Given some capture/
+-- /group index @i@ and some @info@ about a regex, ensure that index exists and/
+-- /is resolved to the number @num@ at compile time.  Then, at runtime, get a/
+-- /capture group from a list of captures./
+--
+-- In practice the variable @i@ is specified by type application and the other
+-- variables are inferred.
+--
+-- > capture @3
+-- > capture @"bar"
+--
+-- Specifying a nonexistant number or name will result in a type error.
 capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
     Captures info -> Text
 capture = view $ _capture @i
 
--- > {-# LANGUAGE DataKinds #-}
--- > {-# LANGUAGE OverloadedStrings #-}
--- > {-# LANGUAGE QuasiQuotes #-}
--- > {-# LANGUAGE TemplateHaskell #-}
--- > {-# LANGUAGE TypeApplications #-}
--- >
--- > main :: IO ()
--- > main = case [regex|(\S+)\s*(?<middle>\S+)|] "foo bar baz" of
--- >     Nothing -> error "Doesn't match"
--- >     Just cs -> do
--- >         print $ capture @"middle" cs              -- "bar"
--- >         print $ capture @1 cs                     -- "foo"
-
--- > {-# LANGUAGE DataKinds #-}
--- > {-# LANGUAGE QuasiQuotes #-}
--- > {-# LANGUAGE TemplateHaskell #-}
--- > {-# LANGUAGE TypeApplications #-}
--- >
--- > import Control.Lens
--- > import Data.Text.Lens
--- >
--- > embeddedNumber :: Traversal' String Int
--- > embeddedNumber = packed . [_re|\d+|] . _capture @0 . unpacked . _Show
--- >
--- > main :: IO ()
--- > main = print $ "There are 14 competing standards" & embeddedNumber %~ (+ 1)
--- >
--- > -- "There are 15 competing standards"
-
--- | Focus from a `Captures` to a capture.  The index is verified at the type
--- level and cannot fail at runtime.
+-- | Like `capture` but focus from a `Captures` to a capture.
 _capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
     Lens' (Captures info) Text
 _capture f (Captures cs) =
