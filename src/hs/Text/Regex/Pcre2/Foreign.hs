@@ -4,7 +4,9 @@
 -- | A complete binding to the low-level C API.
 --
 -- Items here are named identically to their C counterparts.  Therefore,
--- documentation will be sparse; the official PCRE2 API docs should suffice.
+-- documentation will be sparse;
+-- [the official PCRE2 API docs](https://pcre.org/current/doc/html/pcre2api.html#SEC36)
+-- should suffice.
 module Text.Regex.Pcre2.Foreign where
 
 import Foreign

@@ -83,7 +83,7 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 -- >             ...
 --
 -- > forM_ ([regex|^\s+$|] line :: Maybe Text) $ \spaces ->
--- >     die $ "line has spaces only: " ++ show spaces
+-- >     error $ "line has spaces only: " ++ show spaces
 --
 -- /__As a pattern__/
 --

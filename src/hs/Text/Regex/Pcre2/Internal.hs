@@ -950,7 +950,7 @@ getCalloutInfo subject blockPtr = do
 -- function.  Ensure no pointers are leaked!
 getSubCalloutInfo
     :: Text -> Ptr Pcre2_substitute_callout_block -> IO SubCalloutInfo
-getSubCalloutInfo subject blockPtr = do
+getSubCalloutInfo subCalloutSubject blockPtr = do
     subCalloutSubsCount <-
         fromIntegral <$> pcre2_substitute_callout_block_subscount blockPtr
 
@@ -963,16 +963,14 @@ getSubCalloutInfo subject blockPtr = do
                 then return Nothing
                 else Just <$> do
                     end <- peekElemOff ovecPtr $ n * 2 + 1
-                    return $ slice subject $ SliceRange
+                    return $ slice subCalloutSubject $ SliceRange
                         (fromIntegral start)
                         (fromIntegral end)
-
-    let subCalloutSubject = subject
 
     subCalloutReplacement <- do
         outPtr <- pcre2_substitute_callout_block_output blockPtr
         offsetsPtr <- pcre2_substitute_callout_block_output_offsets blockPtr
-        [start, end] <- mapM (peekElemOff offsetsPtr) [0, 1]
+        [start, end] <- forM [0, 1] $ peekElemOff offsetsPtr
         Text.fromPtr
             (castCUs $ advancePtr outPtr $ fromIntegral start)
             (fromIntegral $ end - start)
@@ -1158,13 +1156,13 @@ subOpt option patt replacement = snd . unsafePerformIO . subber where
 _captures :: Text -> Traversal' Text (NonEmpty Text)
 _captures = _capturesOpt mempty
 
--- | @_captures = _capturesOpt mempty@
+-- | @_capturesOpt mempty = _captures@
 _capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
 _capturesOpt = withMatcher $ \matcher -> _capturesInternal matcher [0 ..]
 
 -- | Given a pattern, produce an affine traversal (0 or 1 targets) that focuses
 -- from a subject to the portion of it that matches.
--- 
+--
 -- Equivalent to @\\patt -> `_captures` patt . ix 0@, but more efficient.
 _match :: Text -> Traversal' Text Text
 _match = _matchOpt mempty

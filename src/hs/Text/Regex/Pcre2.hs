@@ -113,7 +113,7 @@ module Text.Regex.Pcre2 (
     caught, it must be at the site where the function returning match or
     substitution results is fully evaluated&#x2014;in other words, wherever it
     is run against a subject.  Even pattern compile errors are deferred to match
-    sites, due to the way this library internally employs
+    sites, due to the way this library employs
     `System.IO.Unsafe.unsafePerformIO` to implement laziness.
 
     >>> broken = match "*"
@@ -132,7 +132,7 @@ module Text.Regex.Pcre2 (
 
     >>> :t broken
     broken :: Alternative f => Text -> f Text
-    >>> broken "foo" `catch` \(e :: SomePcre2Exception) -> return "broken"
+    >>> broken "foo" `catch` \(_ :: SomePcre2Exception) -> return "broken"
     "broken"
     -}
 
