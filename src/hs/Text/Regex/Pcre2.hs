@@ -12,7 +12,7 @@ module Text.Regex.Pcre2 (
     The C API requires pattern strings to be compiled and the compiled patterns
     to be executed on subject strings in discrete steps.  We hide this
     procedure, accepting pattern and subject as arguments in a single function,
-    essentially: 
+    essentially:
 
     > pattern -> subject -> result
 
@@ -208,7 +208,7 @@ module Text.Regex.Pcre2 (
     -- * pattern malformation such as mismatched parentheses /(runtime error)/
     --
     -- * out-of-bounds indexing of a capture group list /(runtime error)/
-    --  
+    --
     -- * out-of-bounds @ix@ing of a @Traversal\'@ target
     -- /(spurious failure to match)/
     --
@@ -218,31 +218,34 @@ module Text.Regex.Pcre2 (
     -- * regex created and discarded inline /(suboptimal performance)/
     --
     -- * ugly\/incorrect number of backslashes in a pattern.  Matching a literal
-    -- backslash requires the pattern @\"\\\\\\\\\"@!.
+    -- backslash requires the sequence @\"\\\\\\\\\"@!
     --
     -- Using a combination of language extensions and pattern introspection
     -- features, we provide a Template Haskell API to mitigate these scenarios.
     -- To make use of it these must be enabled:
     --
-    -- +------------------------------+----------------------------------------+
-    -- | Extension                    | Rationale                              |
-    -- +==============================+========================================+
-    -- | @DataKinds@                  | `GHC.TypeLits.Nat`s (numbers),         |
-    -- |                              | `GHC.TypeLits.Symbol`s (strings), and  |
-    -- |                              | other type-level data powering         |
-    -- |                              | compile-time capture lookups           |
-    -- +------------------------------+----------------------------------------+
-    -- | @QuasiQuotes@                | @[@/f/@|@...@|]@ syntax                |
-    -- +------------------------------+----------------------------------------+
-    -- | @TemplateHaskell@            | Running PCRE2 at compile time and      |
-    -- |                              | generating code                        |
-    -- +------------------------------+----------------------------------------+
-    -- | @TypeApplications@           | @\@i@ syntax for supplying type index  |
-    -- |                              | arguments to applicable functions      |
-    -- +------------------------------+----------------------------------------+
+    -- +--------------------+---------------------------------------+------------------------------+
+    -- | Extension          | Rationale                             | When                         |
+    -- +====================+=======================================+==============================+
+    -- | @DataKinds@        | `GHC.TypeLits.Nat`s (numbers),        | Using `regex`\/`_regex` with |
+    -- |                    | `GHC.TypeLits.Symbol`s (strings), and | a pattern containing         |
+    -- |                    | other type-level data powering        | parenthesized captures       |
+    -- |                    | compile-time capture lookups          |                              |
+    -- +--------------------+---------------------------------------+------------------------------+
+    -- | @QuasiQuotes@      | @[@/f/@|@...@|]@ syntax               | Always                       |
+    -- +--------------------+---------------------------------------+------------------------------+
+    -- | @TemplateHaskell@  | Running PCRE2 at compile time and     | Always                       |
+    -- |                    | generating code                       |                              |
+    -- +--------------------+---------------------------------------+------------------------------+
+    -- | @TypeApplications@ | @\@i@ syntax for supplying type index | Using `capture`\/`_capture`  |
+    -- |                    | arguments to applicable functions     |                              |
+    -- +--------------------+---------------------------------------+------------------------------+
+    -- | @ViewPatterns@     | Calling functions upplying type index | Using `regex` as a Haskell   |
+    -- |                    | arguments to applicable functions     | pattern                      |
+    -- +--------------------+---------------------------------------+------------------------------+
     --
-    -- The inspiration for this portion of the library is languages that support
-    -- regular expressions with [superior ergonomics baked-in](https://ruby-doc.org/core-2.7.2/Regexp.html#class-Regexp-label-Capturing).
+    -- The inspiration for this portion of the library is Ruby, which supports
+    -- regular expressions with [superior ergonomics](https://ruby-doc.org/core-2.7.2/Regexp.html#class-Regexp-label-Capturing).
 
     -- ** Quasi-quoters
     regex,

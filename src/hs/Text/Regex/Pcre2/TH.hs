@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
@@ -41,12 +42,17 @@ predictCaptureNamesQ = runIO . predictCaptureNames mempty . Text.pack
 toKVs :: [Maybe Text] -> [(Int, Text)]
 toKVs names = [(number, name) | (number, Just name) <- zip [0 ..] names]
 
-capturesInfoQ :: String -> TypeQ
-capturesInfoQ s = do
-    -- [Nothing, Just "foo", Just "bar", Nothing]
-    captureNames <- predictCaptureNamesQ s
+capturesInfoQ :: String -> Q (Maybe Type)
+capturesInfoQ s = predictCaptureNamesQ s >>= \case
+    -- No named captures, so need for Captures, so no info.
+    [Nothing] -> return Nothing
 
-    let -- 3
+    -- Named captures.  Present
+    --     [Nothing, Just "foo", Just "bar", Nothing]
+    -- as
+    --     '(3, '[ '("foo", 1), '("bar", 2)]).
+    captureNames -> Just <$> promotedTupleT 2 `appT` hi `appT` kvs where
+        -- 3
         hi = litT $ numTyLit $ fromIntegral $ length captureNames - 1
         -- '[ '("foo", 1), '("bar", 2)]
         kvs = foldr f promotedNilT $ toKVs captureNames where
@@ -56,16 +62,19 @@ capturesInfoQ s = do
                     `appT` litT (strTyLit $ Text.unpack name)    -- "foo"
                     `appT` litT (numTyLit $ fromIntegral number) -- 1
 
-    -- '(3, '[ '("foo", 1), '("bar", 2)])
-    promotedTupleT 2 `appT` hi `appT` kvs
-
--- | When used as an expression, this effectively has the type
+-- | /__As an expression__/
 --
 -- > regex :: (Alternative f) => String -> Text -> f (Captures info)
 --
--- Thus, it is like `capturesA`, except instead of returning a plain @`NonEmpty`
--- `Text`@, it returns an opaque `Captures`.  To retrieve an individual capture
--- from this object, use `capture`.
+-- in the presence of parenthesized captures, or
+--
+-- > regex :: (Alternative f) => String -> Text -> f Text
+--
+-- if there are none.  In other words, if there is more than the 0th capture,
+-- this behaves like `capturesA` (except returning an opaque `Captures` instead
+-- of a list), otherwise it behaves like `match`.
+--
+-- To retrieve an individual capture from a `Captures`, use `capture`.
 --
 -- > case [regex|(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})|] "submitted 2020-10-20" of
 -- >     Just cs ->
@@ -73,8 +82,13 @@ capturesInfoQ s = do
 -- >             year = read @Int $ capture @"y" cs
 -- >             ...
 --
--- When used as a pattern, it matches when the regex matches, whereupon any
--- named captures are bound to variables of the same name.
+-- > forM_ ([regex|^\s+$|] line :: Maybe Text) $ \spaces ->
+-- >     die $ "line has spaces only: " ++ show spaces
+--
+-- /__As a pattern__/
+--
+-- This matches when the regex matches, whereupon any named captures are bound
+-- to variables of the same name.
 --
 -- > case "submitted 2020-10-20" of
 -- >     [regex|(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})|] ->
@@ -82,18 +96,19 @@ capturesInfoQ s = do
 -- >             ...
 --
 -- Note that it is not possible to access the 0th capture this way.  As a
--- workaround, explicitly capture the whole pattern string and name it.  Unnamed
--- captures (including the 0th) do not cause `Text` values to be created
--- wastefully, so this will not incur a performance penalty.
+-- workaround, explicitly capture the whole pattern and name it.
 --
--- If there are no named captures, the pattern simply acts as a guard and does
--- not bind to any variables.
+-- If there are no named captures, it simply acts as a guard.
 regex :: QuasiQuoter
 regex = QuasiQuoter {
-    quoteExp = \s -> [e|
-        let wrap cs = Captures cs :: Captures $(capturesInfoQ s)
-            maybeCaptures = preview $ _capturesInternal $(matcherQ s) [0 ..]
-        in maybe empty (pure . wrap) . maybeCaptures |],
+    quoteExp = \s -> capturesInfoQ s >>= \case
+        Nothing -> [e|
+            let _cs = _capturesInternal $(matcherQ s) [0]
+            in toAlternativeOf $ _cs . _headNE |]
+        Just info -> [e|
+            let wrap cs = Captures cs :: Captures $(return info)
+                _cs = _capturesInternal $(matcherQ s) [0 ..]
+            in toAlternativeOf $ _cs . to wrap |],
 
     quotePat = \s -> do
         captureNames <- predictCaptureNamesQ s
@@ -108,10 +123,10 @@ regex = QuasiQuoter {
             -- One or more named captures.  Attempt to bind only those to local
             -- variables of the same names.
             numberedNames -> viewP e p where
-                (numbers, names) = unzip numberedNames
-                whitelistQ = liftData numbers
-                _csQ = [e| _capturesInternal $(matcherQ s) $(whitelistQ) |]
-                e = [e| view $ $(_csQ) . to NE.toList |]
+                (nums, names) = unzip numberedNames
+                e = [e|
+                    let _cs = _capturesInternal $(matcherQ s) $(liftData nums)
+                    in view $ _cs . to NE.toList |]
                 p = listP $ map (varP . mkName . Text.unpack) names,
 
     quoteType = const $ fail "regex: cannot produce a type",
@@ -121,12 +136,13 @@ regex = QuasiQuoter {
 -- | A lens variant of `regex`.  Can only be used as an expression.
 --
 -- > _regex :: String -> Traversal' Text (Captures info)
+-- > _regex :: String -> Traversal' Text Text
 --
 -- > import Control.Lens
 -- > import Data.Text.Lens
 -- >
 -- > embeddedNumber :: Traversal' String Int
--- > embeddedNumber = packed . [_regex|\d+|] . _capture @0 . unpacked . _Show
+-- > embeddedNumber = packed . [_regex|\d+|] . unpacked . _Show
 -- >
 -- > main :: IO ()
 -- > main = putStrLn $ "There are 14 competing standards" & embeddedNumber %~ (+ 1)
@@ -135,10 +151,12 @@ regex = QuasiQuoter {
 --
 _regex :: QuasiQuoter
 _regex = QuasiQuoter {
-    quoteExp = \s -> [e|
-        let wrapped :: Lens' (NonEmpty Text) (Captures $(capturesInfoQ s))
-            wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
-        in _capturesInternal $(matcherQ s) [0 ..] . wrapped |],
+    quoteExp = \s -> capturesInfoQ s >>= \case
+        Nothing   -> [e| _capturesInternal $(matcherQ s) [0] . _headNE |]
+        Just info -> [e|
+            let wrapped :: Lens' (NonEmpty Text) (Captures $(return info))
+                wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
+            in _capturesInternal $(matcherQ s) [0 ..] . wrapped |],
 
     quotePat = const $ fail "_regex: cannot produce a pattern",
 

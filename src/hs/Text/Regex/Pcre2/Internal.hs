@@ -29,7 +29,7 @@ import           Data.List                  (foldl', intercalate)
 import           Data.List.NonEmpty         (NonEmpty(..))
 import qualified Data.List.NonEmpty         as NE
 import           Data.Maybe                 (fromJust, fromMaybe)
-import           Data.Monoid                (Any(..), First(..))
+import           Data.Monoid                (Alt(..), Any(..), First(..))
 import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
@@ -132,13 +132,16 @@ instance CastCUs Word16 CUShort
 type Lens'      s a = forall f. (Functor f)     => (a -> f a) -> s -> f s
 type Traversal' s a = forall f. (Applicative f) => (a -> f a) -> s -> f s
 
-_headNE :: Lens' (NonEmpty a) a
-_headNE f (x :| xs) = f x <&> \x' -> x' :| xs
-
 preview l = getFirst . getConst . l (Const . First . Just)
 view l = getConst . l Const
 to k f = Const . getConst . f . k
 has l = getAny . getConst . l (\_ -> Const $ Any True)
+
+-- toAlternativeOf :: (Alternative f) => Getting (Alt f a) s a -> s -> f a
+toAlternativeOf l = getAlt . view (l . to (Alt . pure))
+
+_headNE :: Lens' (NonEmpty a) a
+_headNE f (x :| xs) = f x <&> \x' -> x' :| xs
 
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
@@ -253,7 +256,8 @@ data Option
     | PartialSoft -- ^ If the subject ends and all alternatives have been tried,
     -- but no complete match is found, signal a partial match.  Currently we do
     -- this by throwing a `Pcre2Exception` but we should do better.
-    | SubGlobal -- ^ /Affects `subOpt`./  Replace all, rather than just once.
+    | SubGlobal -- ^ /Affects `subOpt`./  Replace all, rather than just the
+    -- first.
     | SubLiteral -- ^ /Affects `subOpt`./  Treat the replacement as a literal
     -- string.
     | SubReplacementOnly -- ^ /Affects `subOpt`./  Return just the rendered
@@ -1067,7 +1071,7 @@ capturesA = capturesOptA mempty
 
 -- | @capturesOptA mempty = capturesA@
 capturesOptA :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
-capturesOptA option patt = maybe empty pure . preview (_capturesOpt option patt)
+capturesOptA option patt = toAlternativeOf $ _capturesOpt option patt
 
 -- | Does the pattern match the subject?
 matches :: Text -> Text -> Bool
@@ -1084,7 +1088,7 @@ match = matchOpt mempty
 
 -- | @matchOpt mempty = match@
 matchOpt :: (Alternative f) => Option -> Text -> Text -> f Text
-matchOpt option patt = maybe empty pure . preview (_matchOpt option patt)
+matchOpt option patt = toAlternativeOf $ _matchOpt option patt
 
 -- | Perform at most one substitution.  See
 -- [the docs](https://pcre.org/current/doc/html/pcre2api.html#SEC36) for the
@@ -1214,20 +1218,19 @@ getCodeInfo codePtr what = alloca $ \wherePtr -> do
 -- information about the number and names of those captures.
 --
 -- This type is only intended to be created by
--- `Text.Regex.Pcre2.regex`/`Text.Regex.Pcre2._regex` and consumed by
--- `Text.Regex.Pcre2.capture`/`Text.Regex.Pcre2._capture`, leveraging type
+-- `Text.Regex.Pcre2.regex`\/`Text.Regex.Pcre2._regex` and consumed by
+-- `Text.Regex.Pcre2.capture`\/`Text.Regex.Pcre2._capture`, relying on type
 -- inference.  Specifying the @info@ explicitly in a type signature is not
 -- supported&#x2014;the definition of `CapturesInfo` is not part of the public
 -- API and may change without warning.
 --
--- After obtaining `Captures` it\'s recommended to immediately consume them by
--- accessing `Text` captures and transforming them into application-level data,
--- to avoid leaking the types to top level and having to write signatures.  In
--- times of need, \"@Captures _@\" may be written with the help of
--- @{-\# LANGUAGE PartialTypeSignatures \#-}@.
+-- After obtaining `Captures` it\'s recommended to immediately consume them and
+-- transform them into application-level data, to avoid leaking the types to top
+-- level and having to write signatures.  In times of need, \"@Captures _@\" may
+-- be written with the help of @{-\# LANGUAGE PartialTypeSignatures \#-}@.
 newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
 
--- | The kind of `Captures`.
+-- | The kind of `Captures`\'s @info@.
 type CapturesInfo = (Nat, [(Symbol, Nat)])
 
 -- | Look up the number of a capture at compile time, either by number or by
@@ -1291,9 +1294,9 @@ instance Exception Pcre2Exception where
     toException = toException . SomePcre2Exception
     fromException = fromException >=> \(SomePcre2Exception e) -> cast e
 
--- | PCRE2 compile exceptions.  Along with a message stating the cause, we
--- show the pattern with a cursor pointing at where the error is (if not after
--- the last character).
+-- | PCRE2 compile exceptions.  Along with a message stating the cause, we show
+-- the pattern with a cursor pointing at where the error is (if not after the
+-- last character).
 data Pcre2CompileException = Pcre2CompileException !CInt !Text !PCRE2_SIZE
 instance Show Pcre2CompileException where
     show (Pcre2CompileException x patt offset) = intercalate "\n" $ [
