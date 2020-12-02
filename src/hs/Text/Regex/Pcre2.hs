@@ -225,7 +225,7 @@ module Text.Regex.Pcre2 (
     -- To make use of it these must be enabled:
     --
     -- +--------------------+---------------------------------------+------------------------------+
-    -- | Extension          | Rationale                             | When                         |
+    -- | Extension          | Required by                           | When                         |
     -- +====================+=======================================+==============================+
     -- | @DataKinds@        | `GHC.TypeLits.Nat`s (numbers),        | Using `regex`\/`_regex` with |
     -- |                    | `GHC.TypeLits.Symbol`s (strings), and | a pattern containing         |
@@ -240,8 +240,9 @@ module Text.Regex.Pcre2 (
     -- | @TypeApplications@ | @\@i@ syntax for supplying type index | Using `capture`\/`_capture`  |
     -- |                    | arguments to applicable functions     |                              |
     -- +--------------------+---------------------------------------+------------------------------+
-    -- | @ViewPatterns@     | Calling functions upplying type index | Using `regex` as a Haskell   |
-    -- |                    | arguments to applicable functions     | pattern                      |
+    -- | @ViewPatterns@     | Running code and binding variables in | Using `regex` as a Haskell   |
+    -- |                    | pattern context proper (pattern       | pattern                      |
+    -- |                    | guards are off-limits for this)       |                              |
     -- +--------------------+---------------------------------------+------------------------------+
     --
     -- The inspiration for this portion of the library is Ruby, which supports
