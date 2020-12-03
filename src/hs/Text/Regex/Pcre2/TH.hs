@@ -79,7 +79,7 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 -- > case [regex|(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})|] "submitted 2020-10-20" of
 -- >     Just cs ->
 -- >         let date = capture @0 cs
--- >             year = read @Int $ capture @"y" cs
+-- >             year = read @Int $ Text.unpack $ capture @"y" cs
 -- >             ...
 --
 -- > forM_ ([regex|^\s+$|] line :: Maybe Text) $ \spaces ->
@@ -88,11 +88,11 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 -- /__As a pattern__/
 --
 -- This matches when the regex matches, whereupon any named captures are bound
--- to variables of the same name.
+-- to variables of the same names.
 --
 -- > case "submitted 2020-10-20" of
 -- >     [regex|(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})|] ->
--- >         let year = read @Int y
+-- >         let year = read @Int $ Text.unpack y
 -- >             ...
 --
 -- Note that it is not possible to access the 0th capture this way.  As a

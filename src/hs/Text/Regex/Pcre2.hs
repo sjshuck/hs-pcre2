@@ -179,7 +179,7 @@ module Text.Regex.Pcre2 (
     --
     -- In addition to getting results, they support substitution through
     -- setting; more generally, they can accrete effects while performing
-    -- replacements generated on the fly.
+    -- replacements.
     --
     -- >>> promptNee = traverseOf (_nee . unpacked) $ \s -> print s >> getLine
     -- >>> promptNee "We are the knights who say...NEE!"
