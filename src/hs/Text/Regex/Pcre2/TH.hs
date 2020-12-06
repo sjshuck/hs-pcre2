@@ -98,7 +98,7 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 -- Note that it is not possible to access the 0th capture this way.  As a
 -- workaround, explicitly capture the whole pattern and name it.
 --
--- If there are no named captures, it simply acts as a guard.
+-- If there are no named captures, this simply acts as a guard.
 regex :: QuasiQuoter
 regex = QuasiQuoter {
     quoteExp = \s -> capturesInfoQ s >>= \case

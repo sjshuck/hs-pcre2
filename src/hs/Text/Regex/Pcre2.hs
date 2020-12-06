@@ -217,7 +217,7 @@ module Text.Regex.Pcre2 (
     --
     -- * regex created and discarded inline /(suboptimal performance)/
     --
-    -- * ugly\/incorrect number of backslashes in a pattern.  Matching a literal
+    -- * precariously many backslashes in a pattern.  Matching a literal
     -- backslash requires the sequence @\"\\\\\\\\\"@!
     --
     -- Using a combination of language extensions and pattern introspection
@@ -225,7 +225,7 @@ module Text.Regex.Pcre2 (
     -- To make use of it these must be enabled:
     --
     -- +--------------------+---------------------------------------+------------------------------+
-    -- | Extension          | Required by                           | When                         |
+    -- | Extension          | Required for                          | When                         |
     -- +====================+=======================================+==============================+
     -- | @DataKinds@        | `GHC.TypeLits.Nat`s (numbers),        | Using `regex`\/`_regex` with |
     -- |                    | `GHC.TypeLits.Symbol`s (strings), and | a pattern containing         |
