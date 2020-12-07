@@ -1,46 +1,66 @@
 # pcre2
 
-## Teaser
+Regular expressions for Haskell.
+
+## Teasers
 ```haskell
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE ViewPatterns #-}
+embeddedLicensePlate :: Text -> Maybe Text
+embeddedLicensePlate = match "[A-Z]{3}[0-9]{3,4}"
+```
+```haskell
+case "The quick brown fox" of
+    [regex|brown\s+(?<animal>\S+)|] -> Text.putStrLn animal
+    _                               -> error "nothing brown"
+```
+```haskell
+let kv'd = lined . packed . [_regex|^\s*(.*?)\s*[=:]\s*(.*)|]
 
-import qualified Data.Text.IO        as Text
-import           Text.Regex.Pcre2.TH (re)
+forMOf kv'd file $ execStateT $ do
+    k <- gets $ capture @1
+    v <- gets $ capture @2
+    liftIO $ Text.putStrLn $ "found " <> k <> " set to " <> v
 
-main = case "The quick brown fox" of
-    [re|brown\s+(?<animal>\S+)|] -> Text.putStrLn animal
-    _                            -> error "nothing brown"
+    case myMap ^. at k of
+        Just v' | v /= v' -> do
+            liftIO $ Text.putStrLn $ "setting " <> k <> " to " <> v'
+            _capture @2 .= v'
+        _ -> liftIO $ Text.putStrLn "no change"
 ```
 
 ## Features
-* Fast.
 * Low-surface API covering most use cases.
-* Quiet, simple functions&mdash;for the most part it's just
-  ```
-  pattern -> subject -> results
-  ```
-* Easy and predictable way to leverage partial application to create performant,
-  compile-once-match-many code.
+* Quiet functions with simple types&mdash;for the most part it's  
+`Text` _(pattern)_ `-> Text` _(subject)_ `-> result`.
+* Use partial application to create performant, compile-once-match-many code.
 * Low cognitive overhead&mdash;there's just one custom datatype for both compile
   and match options, the `Option` monoid.
-* Powerful Template Haskell facilities for compile-time verification of
-  patterns, consuming named captures, and memoizing inline regexes.
+* `Text` everywhere for interop with both C and the broader Haskell ecosystem.
+* Match failures expressed via `Alternative` or pattern match failures.
+* Opt-in Template Haskell facilities for compile-time verification of patterns,
+  indexing captures, and memoizing inline regexes.
+* Opt-in `lens` support.
 * No failure monads to express compile errors, preferring pure functions and
-  throwing unsafe, pure exceptions with pretty `Show` instances.  Write simple
+  throwing imprecise exceptions with pretty `Show` instances.  Write simple
   code and debug it.  Or, don't, and use the Template Haskell features instead.
   Both are first-class.
-* Match failures expressed via `Alternative` or pattern match failures.
 * Vast presentation of PCRE2 functionality.  We can even register Haskell
   callbacks to run during matching!
-* Limited dependencies.  No `regex-base`.
-* Bundled, statically-linked UTF-16 build of up-to-date `libpcre2`.
-* `Text` everywhere, the sweet spot for interop with the underlying C library
-  and with the broader Haskell ecosystem.
-* Opt-in `lens`/`microlens` support.
-  ```haskell
-  let kv'd = lined . packed . [_re|^\s*(.*?)\s*[=:]\s*(.*)|] . substrings
-  forMOf kv'd file $ \(k, v) -> Text.putStrLn $ k <> " set to " <> v
-  ```
+* No dependencies that aren't distributed with GHC.
+* Bundled, statically-linked UTF-16 build of ~~up-to-date~~ PCRE2 (version
+  10.35), with a complete, exposed Haskell binding.
+
+## TODO
+* Global matching.  (We already have global substitution.)
+* Many performance optimizations.  Currently we are 2&ndash;3&times; slower
+  than other libraries doing everything (a few &mu;s).
+* Make use of DFA and JIT compilation.
+* Establish automated builds.
+* Improve PCRE2 C compile time.
+* PCRE2 10.36 is out already.
+
+## License
+[Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0.html).  
+PCRE2 is distributed under the [3-clause BSD](https://www.pcre.org/licence.txt) license.
+
+## Author
+&copy;2020 Shlomo Shuck

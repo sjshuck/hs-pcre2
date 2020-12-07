@@ -64,7 +64,7 @@ main = hspec $ do
                     undefined
             result `shouldBe` ("Shhhhh", [])
 
-        it "does not substitute by setting equal Text" $ do
+        it "does not substitute when setting equal Text" $ do
             let threeAndMiddle = _captures ". (.) ."
             ("A A A" & threeAndMiddle .~ "A A A" :| ["B"]) `shouldBe` "A B A"
             ("A A A" & threeAndMiddle .~ "A B A" :| ["A"]) `shouldBe` "A B A"
