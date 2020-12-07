@@ -110,11 +110,10 @@ module Text.Regex.Pcre2 (
     as [megaparsec](https://hackage.haskell.org/package/megaparsec/docs/Text-Megaparsec.html#t:ParsecT).
 
     By contrast, user errors are thrown purely.  If a user error is to be
-    caught, it must be at the site where the function returning match or
-    substitution results is fully evaluated&#x2014;in other words, wherever it
-    is run against a subject.  Even pattern compile errors are deferred to match
-    sites, due to the way this library employs
-    `System.IO.Unsafe.unsafePerformIO` to implement laziness.
+    caught, it must be at the site where the match or substitution results are
+    evaluated&#x2014;in other words, wherever the regex is applied to a subject.
+    Even pattern compile errors are deferred to match sites, due to the way this
+    library employs `System.IO.Unsafe.unsafePerformIO` to implement laziness.
 
     >>> broken = match "*"
     >>> broken "foo"

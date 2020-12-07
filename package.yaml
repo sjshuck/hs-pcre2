@@ -1,8 +1,8 @@
 name:                pcre2
-version:             0.1.0.0
+version:             1.0.0
 github:              "sjshuck/hs-pcre2"
 license:             Apache-2.0
-license-file:        [LICENSE, src/c/pcre2/LICENCE]
+license-file:        LICENSE # [LICENSE, src/c/pcre2/LICENCE] doesn't work with stack sdist
 author:              "Shlomo Shuck"
 maintainer:          "stevenjshuck@gmail.com"
 copyright:           "2020 Shlomo Shuck"
@@ -10,6 +10,8 @@ copyright:           "2020 Shlomo Shuck"
 extra-source-files:
 - README.md
 - ChangeLog.md
+- src/c/**/*.h
+- src/c/**/*.c
 
 synopsis:            Regular expressions via the PCRE2 C library (included)
 category:            Text
