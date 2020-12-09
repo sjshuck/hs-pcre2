@@ -1,5 +1,9 @@
 # Changelog and Acknowledgements
 
+## 1.0.1.1
+* Temporarily eliminate all dependency version bounds to get it building on
+  Hackage.
+
 ## 1.0.1
 * Fixed [#1](https://github.com/sjshuck/pcre2/1), where building on Windows
   would succeed but not run.  Thanks Andrew!
