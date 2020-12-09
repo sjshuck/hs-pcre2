@@ -1,6 +1,7 @@
 # pcre2
 
-Regular expressions for Haskell.
+Regular expressions for Haskell.  
+https://hackage.haskell.org/package/pcre2
 
 ## Teasers
 ```haskell
