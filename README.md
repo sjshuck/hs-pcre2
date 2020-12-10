@@ -1,5 +1,8 @@
 # pcre2
 
+![CI](https://github.com/sjshuck/hs-pcre2/workflows/CI/badge.svg)
+[![Hackage](https://img.shields.io/hackage/v/pcre2)](https://hackage.haskell.org/package/pcre2)
+
 Regular expressions for Haskell.  
 https://hackage.haskell.org/package/pcre2
 
@@ -55,7 +58,6 @@ forMOf kv'd file $ execStateT $ do
 * Many performance optimizations.  Currently we are 2&ndash;3&times; slower
   than other libraries doing everything (a few &mu;s).
 * Make use of DFA and JIT compilation.
-* Establish automated builds.
 * Improve PCRE2 C compile time.
 * PCRE2 10.36 is out already.
 
