@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 0bca65ec70c4d95e6f4858e0642e56cc49d2587cc4851de7ea632ed2358ab925
+-- hash: 9e2fa347c266eb48c8d78b48cae7cbadf7ea4bf1414ecafc9fbaeb5e2a7c492c
 
 name:           pcre2
 version:        1.0.2
@@ -144,7 +144,7 @@ library
       src/c/pcre2/src/pcre2_valid_utf.c
       src/c/pcre2/src/pcre2_xclass.c
   build-depends:
-      base
+      base >=4.9 && <5
     , containers
     , mtl
     , template-haskell
@@ -160,7 +160,7 @@ test-suite pcre2-test
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base
+      base >=4.9 && <5
     , containers
     , hspec
     , microlens-platform
@@ -179,7 +179,7 @@ benchmark pcre2-benchmarks
       bench
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base
+      base >=4.9 && <5
     , containers
     , criterion
     , microlens-platform

@@ -22,7 +22,7 @@ category:            Text
 description:         Please see the README on GitHub at <https://github.com/sjshuck/hs-pcre2>
 
 dependencies:
-- base
+- base >= 4.9 && < 5
 - containers
 - mtl
 - template-haskell
