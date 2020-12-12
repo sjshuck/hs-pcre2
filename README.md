@@ -4,7 +4,6 @@
 [![Hackage](https://img.shields.io/hackage/v/pcre2)](https://hackage.haskell.org/package/pcre2)
 
 Regular expressions for Haskell.  
-https://hackage.haskell.org/package/pcre2
 
 ## Teasers
 ```haskell
@@ -55,8 +54,8 @@ forMOf kv'd file $ execStateT $ do
 
 ## TODO
 * Global matching.  (We already have global substitution.)
-* Many performance optimizations.  Currently we are 2&ndash;3&times; slower
-  than other libraries doing everything (a few &mu;s).
+* Many performance optimizations.  Currently we are 2&ndash;3&times; slower than
+  other libraries doing most things (order of a few &mu;s).
 * Make use of DFA and JIT compilation.
 * Improve PCRE2 C compile time.
 * PCRE2 10.36 is out already.
@@ -65,5 +64,5 @@ forMOf kv'd file $ execStateT $ do
 [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0.html).  
 PCRE2 is distributed under the [3-clause BSD](https://www.pcre.org/licence.txt) license.
 
-## Author
+## Main Author
 &copy;2020 Shlomo Shuck

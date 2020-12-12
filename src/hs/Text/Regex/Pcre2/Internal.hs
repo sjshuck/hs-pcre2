@@ -1242,7 +1242,7 @@ type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
             num
 
     CaptNum (name :: Symbol) '(_, '(name, num) ': _) = num
-    CaptNum (name :: Symbol) '(hi, _ ': kvs) = 1 + CaptNum name '(hi, kvs)
+    CaptNum (name :: Symbol) '(hi, _ ': kvs) = CaptNum name '(hi, kvs)
     CaptNum (name :: Symbol) _ = TypeError
         (TypeLits.Text "No capture named " :<>: ShowType name)
 
