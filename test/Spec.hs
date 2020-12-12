@@ -189,6 +189,19 @@ main = hspec $ do
         it "permits other captures to be changed via Traversal'" $ do
             ("" & [_regex|(a)?|] . _capture @0 .~ "foo") `shouldBe` "foo"
 
+    describe "bug fixes" bugFixes
+
+bugFixes :: Spec
+bugFixes = do
+    issue 4 $ do
+        let f = fmap (capture @"b") . [regex|(?<a>a)|(?<b>b)|]
+        f "a" `shouldReturn` ""
+        f "b" `shouldReturn` "b"
+
+    where
+    issue :: Int -> Expectation -> Spec
+    issue n = it $ "https://github.com/sjshuck/issues/" ++ show n
+
 onlyCausesOneCompilation :: (Option -> Text -> a) -> Expectation
 onlyCausesOneCompilation regexWithOpt = do
     counter <- newIORef (0 :: Int)
