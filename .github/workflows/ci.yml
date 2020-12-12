@@ -1,0 +1,73 @@
+name: CI
+on:
+  push:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+jobs:
+  cabal:
+    name: Cabal CI
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macOS-latest, windows-latest]
+        ghc:
+          - 8.6.5
+          - 8.8.4
+          - 8.10.2
+        # 8.10.2 is broken on Windows, but there is a patched version
+        exclude:
+          - os: windows-latest
+            ghc: 8.10.2
+        include:
+          - os: windows-latest
+            ghc: 8.10.2.2
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      - uses: haskell/actions/setup@main
+        id: setup-haskell
+        with:
+          ghc-version: ${{ matrix.ghc }}
+      - name: Freeze build
+        run: cabal freeze
+      - uses: actions/cache@v2
+        with:
+          path: ${{ steps.setup-haskell.outputs.cabal-store }}
+          key: cabal-${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('cabal.project.freeze') }}
+          restore-keys: |
+            cabal-${{ runner.os }}-${{ matrix.ghc }}-
+
+      - name: Build library
+        run: cabal build
+      - name: Run tests
+        run: cabal test --test-show-details=direct
+      - name: Build benchmarks
+        run: cabal build --enable-benchmarks
+        # pcre (via pcre-light) not available on windows (without further setup)
+        if: runner.os != 'Windows'
+      - name: Build documentation
+        run: cabal haddock
+  stack:
+    name: Stack CI
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macOS-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      - uses: haskell/actions/setup@main
+        with:
+          enable-stack: true
+          stack-no-global: true
+
+      - name: Build library
+        run: stack build
+      - name: Run tests
+        run: stack test
