@@ -1,6 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PolyKinds #-}
@@ -17,6 +18,8 @@ module Text.Regex.Pcre2.Internal where
 import           Control.Applicative        (Alternative(..))
 import           Control.Exception          hiding (TypeError)
 import           Control.Monad.State.Strict
+import           Control.Monad.Trans.Maybe  (MaybeT(..))
+import           Control.Monad.Writer.Lazy  (WriterT(..), execWriterT, tell)
 import           Data.Either                (partitionEithers)
 import           Data.Function              ((&))
 import           Data.Functor               ((<&>))
@@ -29,12 +32,12 @@ import           Data.List                  (foldl', intercalate)
 import           Data.List.NonEmpty         (NonEmpty(..))
 import qualified Data.List.NonEmpty         as NE
 import           Data.Maybe                 (fromJust, fromMaybe)
-import           Data.Monoid                (Alt(..), Any(..), First(..))
+import           Data.Monoid
 import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
 import qualified Data.Text.Foreign          as Text
-import           Data.Type.Bool             (type (||), If)
+import           Data.Type.Bool             (If, type (||))
 import           Data.Type.Equality         (type (==))
 import           Data.Typeable              (cast)
 import           Foreign
@@ -42,7 +45,7 @@ import           Foreign.C.Types
 import qualified Foreign.Concurrent         as Conc
 import           GHC.TypeLits               hiding (Text)
 import qualified GHC.TypeLits               as TypeLits
-import           System.IO.Unsafe           (unsafePerformIO)
+import           System.IO.Unsafe
 import           Text.Regex.Pcre2.Foreign
 
 -- * General utilities
@@ -136,6 +139,7 @@ preview l = getFirst . getConst . l (Const . First . Just)
 view l = getConst . l Const
 to k f = Const . getConst . f . k
 has l = getAny . getConst . l (\_ -> Const $ Any True)
+toListOf l = flip appEndo [] . view (l . to (Endo . (:)))
 
 -- toAlternativeOf :: (Alternative f) => Getting (Alt f a) s a -> s -> f a
 toAlternativeOf l = getAlt . view (l . to (Alt . pure))
@@ -146,9 +150,10 @@ _headNE f (x :| xs) = f x <&> \x' -> x' :| xs
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
 -- | A matching function where all inputs and auxilliary data structures have
--- been \"compiled\".  It takes a subject and produces a raw result code and
--- match data, to be passed to further validation and inspection.
-type Matcher = Text -> IO (CInt, MatchData)
+-- been \"compiled\".  It takes a subject and produces a list of match data
+-- objects, representing a global match, to be passed to further validation and
+-- inspection.
+type Matcher = Text -> IO [MatchData]
 
 -- | A substitution function.  It takes a subject and produces the number of
 -- substitutions performed (0 or 1, or more in the presence of `SubGlobal`)
@@ -679,25 +684,54 @@ assembleMatcher
     -> IO Matcher
 assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
     let matchTempEnvWithSubj = mkMatchTempEnv matchEnv
-    in \subject -> withForeignPtr matchEnvCode $ \codePtr -> do
-        matchData <- mkForeignPtr pcre2_match_data_free $
-            pcre2_match_data_create_from_pattern codePtr nullPtr
+    in \subject ->
+        withForeignPtr matchEnvCode $ \codePtr ->
+        Text.useAsPtr subject $ \subjPtr subjCUs -> do
+            MatchTempEnv {..} <- matchTempEnvWithSubj subject
 
-        MatchTempEnv {..} <- matchTempEnvWithSubj subject
-        result <-
-            Text.useAsPtr subject $ \subjPtr subjCUs ->
-            withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
-            withForeignPtr matchData $ \matchDataPtr -> pcre2_match
-                codePtr
-                (castCUs subjPtr)
-                (fromIntegral subjCUs)
-                0
-                matchEnvOpts
-                matchDataPtr
-                ctxPtr
-        maybeRethrow matchTempEnvRef
+            -- Loop over the subject, emitting MatchData's until stopping.
+            execWriterT $ runMaybeT $ fix1 0 $ \continue curOff -> do
+                -- TODO Can one of these be reused for a whole global match?
+                matchData <- liftIO $ mkForeignPtr pcre2_match_data_free $
+                    pcre2_match_data_create_from_pattern codePtr nullPtr
 
-        return (result, matchData)
+                result <- liftIO $
+                    withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
+                    withForeignPtr matchData $ \matchDataPtr -> pcre2_match
+                        codePtr
+                        (castCUs subjPtr)
+                        (fromIntegral subjCUs)
+                        curOff
+                        matchEnvOpts
+                        matchDataPtr
+                        ctxPtr
+
+                -- Handle no match and errors
+                when (result == pcre2_ERROR_NOMATCH) stop
+                when (result == pcre2_ERROR_CALLOUT) $
+                    liftIO $ maybeRethrow matchTempEnvRef
+                liftIO $ check (> 0) result
+
+                emit matchData
+
+                lazy $ do
+                    -- Determine next starting offset
+                    nextOff <- liftIO $
+                        withForeignPtr matchData $ \matchDataPtr -> do
+                            ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+                            curOffEnd <- peekElemOff ovecPtr 1
+                            -- Prevent infinite loop upon empty match
+                            return $ max curOffEnd (curOff + 1)
+
+                    -- Handle end of subject
+                    when (nextOff > fromIntegral subjCUs) stop
+
+                    continue nextOff
+
+    where
+    stop = MaybeT $ return Nothing
+    emit x = tell [x]
+    lazy = MaybeT . WriterT . unsafeInterleaveIO . runWriterT . runMaybeT
 
 -- | A `Subber` works by first writing results to a reasonably-sized buffer.  If
 -- we run out of room, PCRE2 allows us to simulate the rest of the substitution
@@ -984,7 +1018,7 @@ maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
 -- * Packaging @Matcher@s and @Subber@s as public API functions
 
 -- | The most general form of a matching function, which can also be used as a
--- @Setter'@ to perform substitutions at the Haskell level.
+-- @Setter'@ to perform substitutions at the Haskell level.  Operates globally.
 --
 -- When any capture is forced, all captures are forced in order to GC C data
 -- more promptly.  When we need /some/ captures but not /all/ captures, we can
@@ -993,22 +1027,23 @@ maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
 --
 -- Internal only!  Users should not (have to) know about `Matcher`.
 _capturesInternal :: Matcher -> [Int] -> Traversal' Text (NonEmpty Text)
-_capturesInternal matcher whitelist f subject
-    | result == pcre2_ERROR_NOMATCH = pure subject
-    | result <= 0                   = throw $ Pcre2Exception result
-    | otherwise                     = f cs <&> \cs' ->
-        -- Swag foldl-as-foldr to create only as many segments as we need to
-        -- stitch back together and no more.
-        let triples = ovecEntries `NE.zip` cs `NE.zip` cs'
-        in Text.concat $ foldr mkSegments termSegments triples 0
+_capturesInternal matcher whitelist f subject = traverse f css <&> \css' ->
+    -- Swag foldl-as-foldr to create only as many segments as we need to
+    -- stitch back together and no more.
+    let triples = zip3 (flatten ovecEntries) (flatten css) (flatten css')
+    in Text.concat $ foldr mkSegments termSegments triples 0
 
     where
 
-    (result, matchData) = unsafePerformIO $ matcher subject
-    cs = unsafePerformIO $ forM ovecEntries $ evaluate . slice subject
-    ovecEntries = unsafePerformIO $ getOvecEntriesAt whitelist matchData
+    flatten = concatMap NE.toList
+    ovecEntries = do
+        matchData <- unsafePerformIO $ matcher subject
+        return $ unsafePerformIO $ getOvecEntriesAt whitelist matchData
+    css = do
+        ovecEntry <- ovecEntries
+        return $ unsafePerformIO $ mapM (evaluate . slice subject) ovecEntry
 
-    mkSegments ((SliceRange off offEnd, c), c') r prevOffEnd
+    mkSegments (SliceRange off offEnd, c, c') r prevOffEnd
         | off == fromIntegral pcre2_UNSET || c == c' =
             -- This substring is unset or unchanged.  Keep going without making
             -- cuts.
@@ -1065,13 +1100,29 @@ capturesOpt option patt = view $ _capturesOpt option patt . to NE.toList
 -- >     Just (date :| [y, m, d]) -> ...
 -- >     Nothing                  -> putStrLn "didn't match"
 capturesA :: (Alternative f) => Text -> Text -> f (NonEmpty Text)
-capturesA = capturesOptA mempty
+capturesA = capturesAOpt mempty
 
--- | @capturesOptA mempty = capturesA@
-capturesOptA :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
-capturesOptA option patt = toAlternativeOf $ _capturesOpt option patt
+-- | @capturesAOpt mempty = capturesA@
+--
+-- @since 1.2.0
+capturesAOpt :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
+capturesAOpt option patt = toAlternativeOf $ _capturesOpt option patt
 
--- | Does the pattern match the subject?
+-- | Match a pattern to a subject and lazily return zero or more non-empty lists
+-- of captures corresponding to every non-overlapping place in the subject the
+-- pattern matched.
+--
+-- @since 1.2.0
+capturesAll :: Text -> Text -> [NonEmpty Text]
+capturesAll = capturesAllOpt mempty
+
+-- | @capturesAllOpt mempty = capturesAll@
+--
+-- @since 1.2.0
+capturesAllOpt :: Option -> Text -> Text -> [NonEmpty Text]
+capturesAllOpt option patt = toListOf $ _capturesOpt option patt
+
+-- | Does the pattern match the subject at least once?
 matches :: Text -> Text -> Bool
 matches = matchesOpt mempty
 
@@ -1080,13 +1131,26 @@ matchesOpt :: Option -> Text -> Text -> Bool
 matchesOpt = withMatcher $ \matcher -> has $ _capturesInternal matcher []
 
 -- | Match a pattern to a subject and return the portion that matched in an
--- @Alternative@, or `empty` if no match.
+-- `Alternative`, or `empty` if no match.
 match :: (Alternative f) => Text -> Text -> f Text
 match = matchOpt mempty
 
 -- | @matchOpt mempty = match@
 matchOpt :: (Alternative f) => Option -> Text -> Text -> f Text
 matchOpt option patt = toAlternativeOf $ _matchOpt option patt
+
+-- | Match a pattern to a subject and lazily return a list of all
+-- non-overlapping portions that matched.
+--
+-- @since 1.2.0
+matchAll :: Text -> Text -> [Text]
+matchAll = matchAllOpt mempty
+
+-- | @matchAllOpt mempty = matchAll@
+--
+-- @since 1.2.0
+matchAllOpt :: Option -> Text -> Text -> [Text]
+matchAllOpt option patt = toListOf $ _matchOpt option patt
 
 -- | Perform at most one substitution.  See
 -- [the docs](https://pcre.org/current/doc/html/pcre2api.html#SEC36) for the
@@ -1116,8 +1180,9 @@ subOpt :: Option -> Text -> Text -> Text -> Text
 subOpt option patt replacement = snd . unsafePerformIO . subber where
     subber = unsafePerformIO $ assembleSubber replacement option patt
 
--- | Given a pattern, produce an affine traversal (0 or 1 targets) that focuses
--- from a subject to a potential non-empty list of captures.
+-- | Given a pattern, produce a traversal (0 or more targets) that focuses
+-- from a subject to each non-empty list of captures that pattern matches
+-- globally.
 --
 -- Substitution works in the following way:  If a capture is set such that the
 -- new `Text` is not equal to the old one, a substitution occurs, otherwise it
@@ -1160,8 +1225,8 @@ _captures = _capturesOpt mempty
 _capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
 _capturesOpt = withMatcher $ \matcher -> _capturesInternal matcher [0 ..]
 
--- | Given a pattern, produce an affine traversal (0 or 1 targets) that focuses
--- from a subject to the portion of it that matches.
+-- | Given a pattern, produce a traversal (0 or more targets) that focuses from
+-- a subject to the portions of it that match.
 --
 -- Equivalent to @\\patt -> `_captures` patt . ix 0@, but more efficient.
 _match :: Text -> Traversal' Text Text

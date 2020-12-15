@@ -53,7 +53,6 @@ forMOf kv'd file $ execStateT $ do
   10.35), with a complete, exposed Haskell binding.
 
 ## TODO
-* Global matching.  (We already have global substitution.)
 * Many performance optimizations.  Currently we are 2&ndash;3&times; slower than
   other libraries doing most things (order of a few &mu;s).
 * Make use of DFA and JIT compilation.
