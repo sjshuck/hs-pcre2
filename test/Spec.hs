@@ -189,6 +189,23 @@ main = hspec $ do
         it "permits other captures to be changed via Traversal'" $ do
             ("" & [_regex|(a)?|] . _capture @0 .~ "foo") `shouldBe` "foo"
 
+    describe "Traversal'" $ do
+        it "supports global substitutions" $ do
+            ("apples and bananas" & _match "a" .~ "o")
+                `shouldBe` "opples ond bononos"
+
+        it "is lazy" $ do
+            counter <- newIORef (0 :: Int)
+            let callout = UnsafeCallout $ \_ -> do
+                    modifyIORef counter (+ 1)
+                    return CalloutProceed
+            take 3 ("apples and bananas" ^.. _matchOpt callout "(?C1)a")
+                `shouldBe` ["a", "a", "a"]
+            readIORef counter `shouldReturn` 3
+
+        it "converges in the presence of empty matches" $ do
+            length (toListOf [_regex||] "12345") `shouldBe` 6
+
     describe "bug fixes" bugFixes
 
 bugFixes :: Spec

@@ -133,7 +133,7 @@ regex = QuasiQuoter {
 
     quoteDec = const $ fail "regex: cannot produce declarations"}
 
--- | A lens variant of `regex`.  Can only be used as an expression.
+-- | A global, optical variant of `regex`.  Can only be used as an expression.
 --
 -- > _regex :: String -> Traversal' Text (Captures info)
 -- > _regex :: String -> Traversal' Text Text

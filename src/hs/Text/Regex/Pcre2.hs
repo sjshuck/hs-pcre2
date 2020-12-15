@@ -138,12 +138,16 @@ module Text.Regex.Pcre2 (
     -- ** Basic matching functions
     match,
     matchOpt,
+    matchAll,
+    matchAllOpt,
     matches,
     matchesOpt,
     captures,
     capturesOpt,
     capturesA,
-    capturesOptA,
+    capturesAOpt,
+    capturesAll,
+    capturesAllOpt,
 
     -- ** PCRE2-native substitution
     sub,
@@ -176,7 +180,7 @@ module Text.Regex.Pcre2 (
     -- > _nee :: Traversal' Text Text
     -- > _nee = _match "(?i)\\bnee\\b"
     --
-    -- In addition to getting results, they support substitution through
+    -- In addition to getting results, they support global substitution through
     -- setting; more generally, they can accrete effects while performing
     -- replacements.
     --
@@ -185,12 +189,6 @@ module Text.Regex.Pcre2 (
     -- "NEE"
     -- NOO
     -- "We are the knights who say...NOO!"
-    -- >>>
-    --
-    -- The optic interface signals match failure by not targeting anything.
-    --
-    -- >>> promptNee "Shhhhh"
-    -- "Shhhhh"
     -- >>>
     --
     -- In general these traversals are not law-abiding.

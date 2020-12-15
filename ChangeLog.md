@@ -1,5 +1,11 @@
 # Changelog and Acknowledgements
 
+## 1.1.0
+* Added global matching.
+    * New functions `matchAll`, `matchAllOpt`, `capturesAll`, `capturesAllOpt`.
+    * Changed all traversals from affine to non-affine.
+* Changed `capturesOptA` to `capturesAOpt` for naming consistency.
+
 ## 1.0.2
 * Fixed [#4](https://github.com/sjshuck/pcre2/4), where multiple named captures
   were not type-indexed correctly.

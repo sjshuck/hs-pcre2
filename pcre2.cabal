@@ -4,16 +4,16 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 9e2fa347c266eb48c8d78b48cae7cbadf7ea4bf1414ecafc9fbaeb5e2a7c492c
+-- hash: 0a7a573e61659cfbca9092c36ae2549d63b0c6745b4bc3953f29dfc97aebd1b6
 
 name:           pcre2
-version:        1.0.2
+version:        1.1.0
 synopsis:       Regular expressions via the PCRE2 C library (included)
 description:    Please see the README on GitHub at <https://github.com/sjshuck/hs-pcre2>
 category:       Text
 homepage:       https://github.com/sjshuck/hs-pcre2#readme
 bug-reports:    https://github.com/sjshuck/hs-pcre2/issues
-author:         Shlomo Shuck
+author:         Shlomo Shuck and contributors
 maintainer:     stevenjshuck@gmail.com
 copyright:      2020 Shlomo Shuck
 license:        Apache-2.0
@@ -149,6 +149,7 @@ library
     , mtl
     , template-haskell
     , text
+    , transformers
   default-language: Haskell2010
 
 test-suite pcre2-test
@@ -168,6 +169,7 @@ test-suite pcre2-test
     , pcre2
     , template-haskell
     , text
+    , transformers
   default-language: Haskell2010
 
 benchmark pcre2-benchmarks
@@ -189,4 +191,5 @@ benchmark pcre2-benchmarks
     , regex-pcre-builtin
     , template-haskell
     , text
+    , transformers
   default-language: Haskell2010

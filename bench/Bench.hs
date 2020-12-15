@@ -68,12 +68,21 @@ main = defaultMain [
             in capture @"bar" cs],
 
     bgroup "substitutions" [
-        bench "PCRE2-native" $ flip nf textSubject $
-            sub (Text.pack "(?<=foo )bar(?= baz)") (Text.pack "quux"),
+        bgroup "single" [
+            bench "PCRE2-native" $ flip nf textSubject $
+                sub (Text.pack "(?<=foo )bar(?= baz)") (Text.pack "quux"),
 
-        let quux = Text.pack "quux"
-        in bench "lens-powered" $ flip nf textSubject $
-            set ([_regex|foo (bar) baz|] . _capture @1) quux]]
+            let quux = Text.pack "quux"
+            in bench "lens-powered" $ flip nf textSubject $
+                set ([_regex|foo (bar) baz|] . _capture @1) quux],
+
+        let fruit = Text.pack "apples and bananas"
+        in bgroup "multiple" [
+            let a2o = gsub (Text.pack "a") (Text.pack "o")
+            in bench "PCRE2-native" $ nf a2o fruit,
+
+            let a2o = set [_regex|a|] (Text.pack "o")
+            in bench "lens-powered" $ nf a2o fruit]]]
 
 stringPattern = "foo (bar) baz"
 stringSubject = "foo bar baz"
