@@ -1082,8 +1082,8 @@ getOvecEntriesAt ns matchData = withForeignPtr matchData $ \matchDataPtr -> do
 withMatcher :: (Matcher -> a) -> Option -> Text -> a
 withMatcher f option patt = f $ unsafePerformIO $ assembleMatcher option patt
 
--- | Match a pattern to a subject and return a list of captures, or @[]@ if no
--- match.
+-- | Match a pattern to a subject once and return a list of captures, or @[]@ if
+-- no match.
 captures :: Text -> Text -> [Text]
 captures = capturesOpt mempty
 
@@ -1091,9 +1091,9 @@ captures = capturesOpt mempty
 capturesOpt :: Option -> Text -> Text -> [Text]
 capturesOpt option patt = view $ _capturesOpt option patt . to NE.toList
 
--- | Match a pattern to a subject and return a non-empty list of captures in an
--- `Alternative`, or `empty` if no match.  The non-empty list constructor `:|`
--- serves as a cue to differentiate the 0th capture from the others:
+-- | Match a pattern to a subject once and return a non-empty list of captures
+-- in an `Alternative`, or `empty` if no match.  The non-empty list constructor
+-- `:|` serves as a cue to differentiate the 0th capture from the others:
 --
 -- > let parseDate = capturesA "(\\d{4})-(\\d{2})-(\\d{2})"
 -- > in case parseDate "submitted 2020-10-20" of
@@ -1104,7 +1104,7 @@ capturesA = capturesAOpt mempty
 
 -- | @capturesAOpt mempty = capturesA@
 --
--- @since 1.2.0
+-- @since 1.1.0
 capturesAOpt :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
 capturesAOpt option patt = toAlternativeOf $ _capturesOpt option patt
 
@@ -1112,13 +1112,13 @@ capturesAOpt option patt = toAlternativeOf $ _capturesOpt option patt
 -- of captures corresponding to every non-overlapping place in the subject the
 -- pattern matched.
 --
--- @since 1.2.0
+-- @since 1.1.0
 capturesAll :: Text -> Text -> [NonEmpty Text]
 capturesAll = capturesAllOpt mempty
 
 -- | @capturesAllOpt mempty = capturesAll@
 --
--- @since 1.2.0
+-- @since 1.1.0
 capturesAllOpt :: Option -> Text -> Text -> [NonEmpty Text]
 capturesAllOpt option patt = toListOf $ _capturesOpt option patt
 
@@ -1130,7 +1130,7 @@ matches = matchesOpt mempty
 matchesOpt :: Option -> Text -> Text -> Bool
 matchesOpt = withMatcher $ \matcher -> has $ _capturesInternal matcher []
 
--- | Match a pattern to a subject and return the portion that matched in an
+-- | Match a pattern to a subject once and return the portion that matched in an
 -- `Alternative`, or `empty` if no match.
 match :: (Alternative f) => Text -> Text -> f Text
 match = matchOpt mempty
@@ -1142,13 +1142,13 @@ matchOpt option patt = toAlternativeOf $ _matchOpt option patt
 -- | Match a pattern to a subject and lazily return a list of all
 -- non-overlapping portions that matched.
 --
--- @since 1.2.0
+-- @since 1.1.0
 matchAll :: Text -> Text -> [Text]
 matchAll = matchAllOpt mempty
 
 -- | @matchAllOpt mempty = matchAll@
 --
--- @since 1.2.0
+-- @since 1.1.0
 matchAllOpt :: Option -> Text -> Text -> [Text]
 matchAllOpt option patt = toListOf $ _matchOpt option patt
 
@@ -1180,9 +1180,8 @@ subOpt :: Option -> Text -> Text -> Text -> Text
 subOpt option patt replacement = snd . unsafePerformIO . subber where
     subber = unsafePerformIO $ assembleSubber replacement option patt
 
--- | Given a pattern, produce a traversal (0 or more targets) that focuses
--- from a subject to each non-empty list of captures that pattern matches
--- globally.
+-- | Given a pattern, produce a traversal (0 or more targets) that focuses from
+-- a subject to each non-empty list of captures that pattern matches globally.
 --
 -- Substitution works in the following way:  If a capture is set such that the
 -- new `Text` is not equal to the old one, a substitution occurs, otherwise it
