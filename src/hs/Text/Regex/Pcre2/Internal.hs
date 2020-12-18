@@ -150,10 +150,11 @@ _headNE f (x :| xs) = f x <&> \x' -> x' :| xs
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
 -- | A matching function where all inputs and auxilliary data structures have
--- been \"compiled\".  It takes a subject and produces a list of match data
--- objects, representing a global match, to be passed to further validation and
--- inspection.
-type Matcher = Text -> IO [MatchData]
+-- been \"compiled\".  It takes a subject and a whitelist of capture indexes
+-- to extract, and produces lists of capture offsets representing a global
+-- match.  The whitelist is @[]@ rather than @NonEmpty@ to facilitate writing
+-- literals.
+type Matcher = Text -> [Int] -> IO [NonEmpty SliceRange]
 
 -- | A substitution function.  It takes a subject and produces the number of
 -- substitutions performed (0 or 1, or more in the presence of `SubGlobal`)
@@ -658,12 +659,12 @@ extractMatchEnv matchEnvCode = do
     return $ MatchEnv {..}
 
 -- | Helper for @assemble*@ functions.  Basically, extract all options and help
--- produce a function that takes a `Text` subject and does something.
+-- produce a function that takes a `Text` subject.
 assembleSubjFun
-    :: (MatchEnv -> Text -> IO a)
+    :: (MatchEnv -> Text -> a)
     -> Option
     -> Text
-    -> IO (Text -> IO a)
+    -> IO (Text -> a)
 assembleSubjFun mkSubjFun option patt =
     runStateT extractAll (applyOption option) <&> \case
         (subjFun, []) -> subjFun
@@ -684,17 +685,16 @@ assembleMatcher
     -> IO Matcher
 assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
     let matchTempEnvWithSubj = mkMatchTempEnv matchEnv
-    in \subject ->
+    in \subject whitelist ->
         withForeignPtr matchEnvCode $ \codePtr ->
         Text.useAsPtr subject $ \subjPtr subjCUs -> do
             MatchTempEnv {..} <- matchTempEnvWithSubj subject
 
-            -- Loop over the subject, emitting MatchData's until stopping.
-            execWriterT $ runMaybeT $ fix1 0 $ \continue curOff -> do
-                -- TODO Can one of these be reused for a whole global match?
-                matchData <- liftIO $ mkForeignPtr pcre2_match_data_free $
-                    pcre2_match_data_create_from_pattern codePtr nullPtr
+            matchData <- mkForeignPtr pcre2_match_data_free $
+                pcre2_match_data_create_from_pattern codePtr nullPtr
 
+            -- Loop over the subject, emitting slice lists until stopping.
+            execWriterT $ runMaybeT $ fix1 0 $ \continue curOff -> do
                 result <- liftIO $
                     withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
                     withForeignPtr matchData $ \matchDataPtr -> pcre2_match
@@ -712,7 +712,10 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
                     liftIO $ maybeRethrow matchTempEnvRef
                 liftIO $ check (> 0) result
 
-                emit matchData
+                slices <- liftIO $ unsafeInterleaveIO $
+                    withForeignPtr matchData $ getOvecEntriesAt whitelist
+
+                emit slices
 
                 lazy $ do
                     -- Determine next starting offset
@@ -726,7 +729,9 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
                     -- Handle end of subject
                     when (nextOff > fromIntegral subjCUs) stop
 
-                    continue nextOff
+                    -- Force slices out of the current match_data state before
+                    -- clobbering it with the next match
+                    slices `seq` continue nextOff
 
     where
     stop = MaybeT $ return Nothing
@@ -1028,17 +1033,15 @@ maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
 -- Internal only!  Users should not (have to) know about `Matcher`.
 _capturesInternal :: Matcher -> [Int] -> Traversal' Text (NonEmpty Text)
 _capturesInternal matcher whitelist f subject = traverse f css <&> \css' ->
-    -- Swag foldl-as-foldr to create only as many segments as we need to
-    -- stitch back together and no more.
+    -- Swag foldl-as-foldr to create only as many segments as we need to stitch
+    -- back together and no more.
     let triples = zip3 (flatten ovecEntries) (flatten css) (flatten css')
     in Text.concat $ foldr mkSegments termSegments triples 0
 
     where
 
     flatten = concatMap NE.toList
-    ovecEntries = do
-        matchData <- unsafePerformIO $ matcher subject
-        return $ unsafePerformIO $ getOvecEntriesAt whitelist matchData
+    ovecEntries = unsafePerformIO $ matcher subject whitelist
     css = do
         ovecEntry <- ovecEntries
         return $ unsafePerformIO $ mapM (evaluate . slice subject) ovecEntry
@@ -1061,12 +1064,12 @@ _capturesInternal matcher whitelist f subject = traverse f css <&> \css' ->
 
 -- | Strictly read specifically indexed captures' offsets from match results.
 -- Truncate indexes when they go out of bounds, to support infinite lists.
-getOvecEntriesAt :: [Int] -> MatchData -> IO (NonEmpty SliceRange)
-getOvecEntriesAt ns matchData = withForeignPtr matchData $ \matchDataPtr -> do
+getOvecEntriesAt :: [Int] -> Ptr Pcre2_match_data -> IO (NonEmpty SliceRange)
+getOvecEntriesAt whitelist matchDataPtr = do
     count <- fromIntegral <$> pcre2_get_ovector_count matchDataPtr
 
-    case NE.nonEmpty $ takeWhile (< count) ns of
-        Nothing -> error "BUG! Tried to get empty list of captures"
+    case NE.nonEmpty $ takeWhile (< count) whitelist of
+        Nothing -> error "BUG! Empty whitelist"
         Just ns -> do
             ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
 

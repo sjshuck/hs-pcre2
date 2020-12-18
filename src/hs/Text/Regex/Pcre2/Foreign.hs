@@ -5,7 +5,7 @@
 --
 -- Items here are named identically to their C counterparts.  Therefore,
 -- documentation will be sparse;
--- [the official PCRE2 API docs](https://pcre.org/current/doc/html/pcre2api.html#SEC36)
+-- [the official PCRE2 API docs](https://pcre.org/current/doc/html/pcre2api.html)
 -- should suffice.
 module Text.Regex.Pcre2.Foreign where
 
