@@ -48,7 +48,7 @@ forMOf kv'd file $ execStateT $ do
   Both are first-class.
 * Vast presentation of PCRE2 functionality.  We can even register Haskell
   callbacks to run during matching!
-* No dependencies that aren't distributed with GHC.
+* Few dependencies.
 * Bundled, statically-linked UTF-16 build of ~~up-to-date~~ PCRE2 (version
   10.35), with a complete, exposed Haskell binding.
 
