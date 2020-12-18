@@ -421,7 +421,6 @@ data SubCalloutResult
 type CompileContext = ForeignPtr Pcre2_compile_context
 type Code           = ForeignPtr Pcre2_code
 type MatchContext   = ForeignPtr Pcre2_match_context
-type MatchData      = ForeignPtr Pcre2_match_data
 
 -- | An `Option` can result in multiple \"plans\".
 applyOption :: Option -> [AppliedOption]
@@ -690,48 +689,48 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
         Text.useAsPtr subject $ \subjPtr subjCUs -> do
             MatchTempEnv {..} <- matchTempEnvWithSubj subject
 
-            matchData <- mkForeignPtr pcre2_match_data_free $
-                pcre2_match_data_create_from_pattern codePtr nullPtr
+            let withMatchDataPtr = bracket
+                    (pcre2_match_data_create_from_pattern codePtr nullPtr)
+                    pcre2_match_data_free
+            withMatchDataPtr $ \matchDataPtr ->
+                -- Loop over the subject, emitting slice lists until stopping.
+                execWriterT $ runMaybeT $ fix1 0 $ \continue curOff -> do
+                    result <- liftIO $
+                        withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
+                            pcre2_match
+                                codePtr
+                                (castCUs subjPtr)
+                                (fromIntegral subjCUs)
+                                curOff
+                                matchEnvOpts
+                                matchDataPtr
+                                ctxPtr
 
-            -- Loop over the subject, emitting slice lists until stopping.
-            execWriterT $ runMaybeT $ fix1 0 $ \continue curOff -> do
-                result <- liftIO $
-                    withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
-                    withForeignPtr matchData $ \matchDataPtr -> pcre2_match
-                        codePtr
-                        (castCUs subjPtr)
-                        (fromIntegral subjCUs)
-                        curOff
-                        matchEnvOpts
-                        matchDataPtr
-                        ctxPtr
+                    -- Handle no match and errors
+                    when (result == pcre2_ERROR_NOMATCH) stop
+                    when (result == pcre2_ERROR_CALLOUT) $
+                        liftIO $ maybeRethrow matchTempEnvRef
+                    liftIO $ check (> 0) result
 
-                -- Handle no match and errors
-                when (result == pcre2_ERROR_NOMATCH) stop
-                when (result == pcre2_ERROR_CALLOUT) $
-                    liftIO $ maybeRethrow matchTempEnvRef
-                liftIO $ check (> 0) result
+                    slices <- liftIO $ unsafeInterleaveIO $
+                        getOvecEntriesAt whitelist matchDataPtr
 
-                slices <- liftIO $ unsafeInterleaveIO $
-                    withForeignPtr matchData $ getOvecEntriesAt whitelist
+                    emit slices
 
-                emit slices
-
-                lazy $ do
-                    -- Determine next starting offset
-                    nextOff <- liftIO $
-                        withForeignPtr matchData $ \matchDataPtr -> do
+                    lazy $ do
+                        -- Determine next starting offset
+                        nextOff <- liftIO $ do
                             ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
                             curOffEnd <- peekElemOff ovecPtr 1
                             -- Prevent infinite loop upon empty match
                             return $ max curOffEnd (curOff + 1)
 
-                    -- Handle end of subject
-                    when (nextOff > fromIntegral subjCUs) stop
+                        -- Handle end of subject
+                        when (nextOff > fromIntegral subjCUs) stop
 
-                    -- Force slices out of the current match_data state before
-                    -- clobbering it with the next match
-                    slices `seq` continue nextOff
+                        -- Force slices out of the current match_data state
+                        -- before clobbering it with the next match
+                        slices `seq` continue nextOff
 
     where
     stop = MaybeT $ return Nothing
