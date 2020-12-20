@@ -690,21 +690,24 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
         Text.useAsPtr subject $ \subjPtr subjCUs -> do
             MatchTempEnv {..} <- matchTempEnvWithSubj subject
 
-            matchData <- mkForeignPtr pcre2_match_data_free $
-                pcre2_match_data_create_from_pattern codePtr nullPtr
+            -- These need to happen one after the other.  We need the
+            -- ForeignPtr to touch later, to allow cleanup after lazy matching.
+            matchDataPtr <- pcre2_match_data_create_from_pattern codePtr nullPtr
+            matchData <-
+                Conc.newForeignPtr <*> pcre2_match_data_free $ matchDataPtr
 
             -- Loop over the subject, emitting slice lists until stopping.
-            execWriterT $ runMaybeT $ fix1 0 $ \continue curOff -> do
+            lists <- execWriterT $ runMaybeT $ fix1 0 $ \continue curOff -> do
                 result <- liftIO $
                     withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
-                    withForeignPtr matchData $ \matchDataPtr -> pcre2_match
-                        codePtr
-                        (castCUs subjPtr)
-                        (fromIntegral subjCUs)
-                        curOff
-                        matchEnvOpts
-                        matchDataPtr
-                        ctxPtr
+                        pcre2_match
+                            codePtr
+                            (castCUs subjPtr)
+                            (fromIntegral subjCUs)
+                            curOff
+                            matchEnvOpts
+                            matchDataPtr
+                            ctxPtr
 
                 -- Handle no match and errors
                 when (result == pcre2_ERROR_NOMATCH) stop
@@ -713,18 +716,17 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
                 liftIO $ check (> 0) result
 
                 slices <- liftIO $ unsafeInterleaveIO $
-                    withForeignPtr matchData $ getOvecEntriesAt whitelist
+                    getOvecEntriesAt whitelist matchDataPtr
 
                 emit slices
 
                 lazy $ do
                     -- Determine next starting offset
-                    nextOff <- liftIO $
-                        withForeignPtr matchData $ \matchDataPtr -> do
-                            ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
-                            curOffEnd <- peekElemOff ovecPtr 1
-                            -- Prevent infinite loop upon empty match
-                            return $ max curOffEnd (curOff + 1)
+                    nextOff <- liftIO $ do
+                        ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+                        curOffEnd <- peekElemOff ovecPtr 1
+                        -- Prevent infinite loop upon empty match
+                        return $ max curOffEnd (curOff + 1)
 
                     -- Handle end of subject
                     when (nextOff > fromIntegral subjCUs) stop
@@ -732,6 +734,10 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
                     -- Force slices out of the current match_data state before
                     -- clobbering it with the next match
                     slices `seq` continue nextOff
+
+            touchForeignPtr matchData
+
+            return lists
 
     where
     stop = MaybeT $ return Nothing
