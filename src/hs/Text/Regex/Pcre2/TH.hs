@@ -126,7 +126,7 @@ regex = QuasiQuoter {
                 (nums, names) = unzip numberedNames
                 e = [e|
                     let _cs = _capturesInternal $(matcherQ s) $(liftData nums)
-                    in view $ _cs . to NE.toList |]
+                    in maybe [] NE.toList . preview _cs |]
                 p = listP $ map (varP . mkName . Text.unpack) names,
 
     quoteType = const $ fail "regex: cannot produce a type",

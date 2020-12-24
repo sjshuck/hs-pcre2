@@ -1098,7 +1098,8 @@ captures = capturesOpt mempty
 
 -- | @capturesOpt mempty = captures@
 capturesOpt :: Option -> Text -> Text -> [Text]
-capturesOpt option patt = view $ _capturesOpt option patt . to NE.toList
+capturesOpt option patt =
+    maybe [] NE.toList . preview (_capturesOpt option patt)
 
 -- | Match a pattern to a subject once and return a non-empty list of captures
 -- in an `Alternative`, or `empty` if no match.  The non-empty list constructor
@@ -1117,9 +1118,8 @@ capturesA = capturesAOpt mempty
 capturesAOpt :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
 capturesAOpt option patt = toAlternativeOf $ _capturesOpt option patt
 
--- | Match a pattern to a subject and lazily return zero or more non-empty lists
--- of captures corresponding to every non-overlapping place in the subject the
--- pattern matched.
+-- | Match a pattern to a subject and lazily a list of all non-overlapping
+-- portions, with all capture groups, that matched.
 --
 -- @since 1.1.0
 capturesAll :: Text -> Text -> [NonEmpty Text]

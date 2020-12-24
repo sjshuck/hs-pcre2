@@ -1,5 +1,9 @@
 # Changelog and Acknowledgements
 
+## 1.1.1
+* Fixed [#12](https://github.com/sjshuck/pcre2/4), where some functions returned
+  too many match results.
+
 ## 1.1.0
 * Added global matching.
     * New functions `matchAll`, `matchAllOpt`, `capturesAll`, `capturesAllOpt`.

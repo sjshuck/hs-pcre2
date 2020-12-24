@@ -215,6 +215,13 @@ bugFixes = do
         f "a" `shouldReturn` ""
         f "b" `shouldReturn` "b"
 
+    issue 12 $ do
+        captures ".a." "foo bar baz" `shouldBe` ["bar"]
+        case "foo bar baz" of
+            [regex|.a(?<x>.)|] -> return ()
+            _                  ->
+                expectationFailure "quasi-quoted pattern didn't match"
+
     where
     issue :: Int -> Expectation -> Spec
     issue n = it $ "https://github.com/sjshuck/issues/" ++ show n
