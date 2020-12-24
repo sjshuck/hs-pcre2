@@ -115,8 +115,6 @@ thinSlice text (SliceRange off offEnd)
         & Text.takeWord16 (offEnd - off)
 
 -- | Slice a 'Text', copying if it\'s less than half of the original.
---
--- Copying (via `Text.copy`) is /extremely/ slow!
 slice :: Text -> SliceRange -> Text
 slice text sliceRange =
     let substring = thinSlice text sliceRange

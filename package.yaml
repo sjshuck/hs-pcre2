@@ -1,5 +1,5 @@
 name:                pcre2
-version:             1.1.1
+version:             1.1.2
 github:              "sjshuck/hs-pcre2"
 license:             Apache-2.0
 license-file:        LICENSE # [LICENSE, src/c/pcre2/LICENCE] doesn't work with stack sdist

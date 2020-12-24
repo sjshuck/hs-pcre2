@@ -1,5 +1,10 @@
 # Changelog and Acknowledgements
 
+## 1.1.2
+* Refactored using the `streaming` library.  Fixed
+  [#11](https://github.com/sjshuck/pcre2/11), where large global matches were
+  very slow.
+
 ## 1.1.1
 * Fixed [#12](https://github.com/sjshuck/pcre2/4), where some functions returned
   too many match results.
