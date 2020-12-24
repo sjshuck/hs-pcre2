@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: d8aba62e213c9b15ec9218a159e7922eb4ebb298385cd3ff0e1acd1f15fd6506
+-- hash: 5ed52c8fccb73b5a995dd11b6f1b40cca58a27b55ff8171d6feed53d3ba6e385
 
 name:           pcre2
 version:        1.1.1
@@ -147,9 +147,9 @@ library
       base >=4.9 && <5
     , containers
     , mtl
+    , streaming
     , template-haskell
     , text
-    , transformers
   default-language: Haskell2010
 
 test-suite pcre2-test
@@ -167,9 +167,9 @@ test-suite pcre2-test
     , microlens-platform
     , mtl
     , pcre2
+    , streaming
     , template-haskell
     , text
-    , transformers
   default-language: Haskell2010
 
 benchmark pcre2-benchmarks
@@ -189,7 +189,7 @@ benchmark pcre2-benchmarks
     , pcre-light
     , pcre2
     , regex-pcre-builtin
+    , streaming
     , template-haskell
     , text
-    , transformers
   default-language: Haskell2010
