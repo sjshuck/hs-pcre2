@@ -18,8 +18,6 @@ module Text.Regex.Pcre2.Internal where
 import           Control.Applicative        (Alternative(..))
 import           Control.Exception          hiding (TypeError)
 import           Control.Monad.State.Strict
-import           Control.Monad.Trans.Maybe  (MaybeT(..))
-import           Control.Monad.Writer.Lazy  (WriterT(..), execWriterT, tell)
 import           Data.Either                (partitionEithers)
 import           Data.Function              ((&))
 import           Data.Functor               ((<&>))
@@ -31,7 +29,6 @@ import qualified Data.IntMap.Strict         as IM
 import           Data.List                  (foldl', intercalate)
 import           Data.List.NonEmpty         (NonEmpty(..))
 import qualified Data.List.NonEmpty         as NE
-import           Data.Maybe                 (fromJust, fromMaybe)
 import           Data.Monoid
 import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
@@ -45,6 +42,9 @@ import           Foreign.C.Types
 import qualified Foreign.Concurrent         as Conc
 import           GHC.TypeLits               hiding (Text)
 import qualified GHC.TypeLits               as TypeLits
+import           Streaming                  (Of(..), Stream)
+import qualified Streaming
+import qualified Streaming.Prelude          as Streaming
 import           System.IO.Unsafe
 import           Text.Regex.Pcre2.Foreign
 
@@ -73,6 +73,10 @@ safeLast xs = Just $ last xs
 
 bitOr :: (Foldable t, Num a, Bits a) => t a -> a
 bitOr = foldl' (.|.) 0
+
+-- | Placeholder for half-building a `Traversal'` to be passed to `has`.
+noTouchy :: a
+noTouchy = error "BUG! Tried to use match results"
 
 -- | Equivalent to @flip fix@.
 --
@@ -150,11 +154,14 @@ _headNE f (x :| xs) = f x <&> \x' -> x' :| xs
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
 -- | A matching function where all inputs and auxilliary data structures have
--- been \"compiled\".  It takes a subject and a whitelist of capture indexes
--- to extract, and produces lists of capture offsets representing a global
--- match.  The whitelist is @[]@ rather than @NonEmpty@ to facilitate writing
--- literals.
-type Matcher = Text -> [Int] -> IO [NonEmpty SliceRange]
+-- been \"compiled\".  It takes a subject a produces a finite stream of match
+-- results corresponding to a global match.
+--
+-- The actual values of type @Ptr Pcre2_match_data@ will be equal within each
+-- global match; they represent the states of the C data at moments in time, and
+-- are intended to be composed with another streaming transformation before
+-- being subjected to teardown and `unsafePerformIO`.
+type Matcher = Text -> Stream (Of (Ptr Pcre2_match_data)) IO ()
 
 -- | A substitution function.  It takes a subject and produces the number of
 -- substitutions performed (0 or 1, or more in the presence of `SubGlobal`)
@@ -678,26 +685,18 @@ assembleSubjFun mkSubjFun option patt =
 
         return $ mkSubjFun matchEnv
 
--- | Produce a `Matcher`.
-assembleMatcher
-    :: Option
-    -> Text       -- ^ pattern
-    -> IO Matcher
+-- | Produce a `Matcher` from user-supplied `Option` and pattern.
+assembleMatcher :: Option -> Text -> IO Matcher
 assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
     let matchTempEnvWithSubj = mkMatchTempEnv matchEnv
-    in \subject whitelist ->
+    in \subject -> Streaming.effect $
         withForeignPtr matchEnvCode $ \codePtr ->
+        withMatchDataFromCode codePtr $ \matchDataPtr ->
         Text.useAsPtr subject $ \subjPtr subjCUs -> do
             MatchTempEnv {..} <- matchTempEnvWithSubj subject
 
-            -- These need to happen one after the other.  We need the
-            -- ForeignPtr to touch later, to allow cleanup after lazy matching.
-            matchDataPtr <- pcre2_match_data_create_from_pattern codePtr nullPtr
-            matchData <-
-                Conc.newForeignPtr <*> pcre2_match_data_free $ matchDataPtr
-
             -- Loop over the subject, emitting slice lists until stopping.
-            lists <- execWriterT $ runMaybeT $ fix1 0 $ \continue curOff -> do
+            return $ fix1 0 $ \continue curOff -> do
                 result <- liftIO $
                     withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
                         pcre2_match
@@ -710,17 +709,13 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
                             ctxPtr
 
                 -- Handle no match and errors
-                when (result == pcre2_ERROR_NOMATCH) stop
-                when (result == pcre2_ERROR_CALLOUT) $
-                    liftIO $ maybeRethrow matchTempEnvRef
-                liftIO $ check (> 0) result
+                unless (result == pcre2_ERROR_NOMATCH) $ do
+                    when (result == pcre2_ERROR_CALLOUT) $
+                        liftIO $ maybeRethrow matchTempEnvRef
+                    liftIO $ check (> 0) result
 
-                slices <- liftIO $ unsafeInterleaveIO $
-                    getOvecEntriesAt whitelist matchDataPtr
+                    Streaming.yield matchDataPtr
 
-                emit slices
-
-                lazy $ do
                     -- Determine next starting offset
                     nextOff <- liftIO $ do
                         ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
@@ -729,20 +724,16 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
                         return $ max curOffEnd (curOff + 1)
 
                     -- Handle end of subject
-                    when (nextOff > fromIntegral subjCUs) stop
-
-                    -- Force slices out of the current match_data state before
-                    -- clobbering it with the next match
-                    slices `seq` continue nextOff
-
-            touchForeignPtr matchData
-
-            return lists
+                    unless (nextOff > fromIntegral subjCUs) $
+                        -- Force slices out of the current match_data state
+                        -- before clobbering it with the next match
+                        continue nextOff
 
     where
-    stop = MaybeT $ return Nothing
-    emit x = tell [x]
-    lazy = MaybeT . WriterT . unsafeInterleaveIO . runWriterT . runMaybeT
+    withMatchDataFromCode codePtr action = do
+        matchData <- mkForeignPtr pcre2_match_data_free $
+            pcre2_match_data_create_from_pattern codePtr nullPtr
+        withForeignPtr matchData action
 
 -- | A `Subber` works by first writing results to a reasonably-sized buffer.  If
 -- we run out of room, PCRE2 allows us to simulate the rest of the substitution
@@ -1031,26 +1022,29 @@ maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
 -- | The most general form of a matching function, which can also be used as a
 -- @Setter'@ to perform substitutions at the Haskell level.  Operates globally.
 --
--- When any capture is forced, all captures are forced in order to GC C data
--- more promptly.  When we need /some/ captures but not /all/ captures, we can
--- pass in a whitelist of the numbers of captures we want, thereby avoiding
--- unnecessary allocations.
---
 -- Internal only!  Users should not (have to) know about `Matcher`.
-_capturesInternal :: Matcher -> [Int] -> Traversal' Text (NonEmpty Text)
-_capturesInternal matcher whitelist f subject = traverse f css <&> \css' ->
-    -- Swag foldl-as-foldr to create only as many segments as we need to stitch
-    -- back together and no more.
-    let triples = zip3 (flatten ovecEntries) (flatten css) (flatten css')
-    in Text.concat $ foldr mkSegments termSegments triples 0
+_capturesInternal
+    :: Matcher
+    -> FromMatch                    -- ^ get some or all captures offsets
+    -> (Text -> SliceRange -> Text) -- ^ slicer
+    -> Traversal' Text (NonEmpty Text)
+_capturesInternal matcher getSliceRanges slicer f subject =
+    traverse f captureLists <&> \captureLists' ->
+        -- Swag foldl-as-foldr to create only as many segments as we need to
+        -- stitch back together and no more.
+        let triples = concat $ zipWith3 zip3
+                (map NE.toList sliceRangeLists)
+                (map NE.toList captureLists)
+                (map NE.toList captureLists')
+        in Text.concat $ foldr mkSegments termSegments triples 0
 
     where
-
-    flatten = concatMap NE.toList
-    ovecEntries = unsafePerformIO $ matcher subject whitelist
-    css = do
-        ovecEntry <- ovecEntries
-        return $ unsafePerformIO $ mapM (evaluate . slice subject) ovecEntry
+    sliceRangeLists = Streaming.destroy
+        (Streaming.mapM getSliceRanges $ matcher subject)
+        (\(srs :> srss) -> srs : srss)
+        unsafePerformIO
+        (const [])
+    captureLists = map (NE.map $ slicer subject) sliceRangeLists
 
     mkSegments (SliceRange off offEnd, c, c') r prevOffEnd
         | off == fromIntegral pcre2_UNSET || c == c' =
@@ -1068,23 +1062,34 @@ _capturesInternal matcher whitelist f subject = traverse f css <&> \css' ->
         -- cases where no substring is changed.
         in [thinSlice subject (SliceRange off offEnd) | off /= offEnd]
 
--- | Strictly read specifically indexed captures' offsets from match results.
--- Truncate indexes when they go out of bounds, to support infinite lists.
-getOvecEntriesAt :: [Int] -> Ptr Pcre2_match_data -> IO (NonEmpty SliceRange)
-getOvecEntriesAt whitelist matchDataPtr = do
+-- | A function that takes a subject and a C match result, and extracts a
+-- collection of captures.  We need to pass this effectful callback to
+-- `_capturesInternal` because of the latter\'s tight, imperative loop that
+-- reuses the same @pcre2_match_data@ block.
+type FromMatch = Ptr Pcre2_match_data -> IO (NonEmpty SliceRange)
+
+-- | Read all specifically indexed captures\' offsets from match results.
+getWhitelistedSliceRanges :: NonEmpty Int -> FromMatch
+getWhitelistedSliceRanges whitelist matchDataPtr = do
+    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+    let peekOvec :: Int -> IO Text.I16
+        peekOvec = fmap fromIntegral . peekElemOff ovecPtr
+
+    forM whitelist $ \i -> liftM2 SliceRange
+        (peekOvec $ i * 2)
+        (peekOvec $ i * 2 + 1)
+
+-- | Read just the 0th capture\'s offsets from match results.
+get0thSliceRanges :: FromMatch
+get0thSliceRanges = getWhitelistedSliceRanges $ 0 :| []
+
+-- | Read all captures\' offsets from match results.
+getAllSliceRanges :: FromMatch
+getAllSliceRanges matchDataPtr = do
     count <- fromIntegral <$> pcre2_get_ovector_count matchDataPtr
+    let whitelist = 0 :| [1 .. count - 1]
 
-    case NE.nonEmpty $ takeWhile (< count) whitelist of
-        Nothing -> error "BUG! Empty whitelist"
-        Just ns -> do
-            ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
-
-            let peekOvec :: Int -> IO Text.I16
-                peekOvec = fmap fromIntegral . peekElemOff ovecPtr
-
-            forM ns $ \n -> liftM2 SliceRange
-                (peekOvec $ n * 2)
-                (peekOvec $ n * 2 + 1)
+    getWhitelistedSliceRanges whitelist matchDataPtr
 
 -- | Helper to create non-Template Haskell API functions.  They all take options
 -- and a pattern, and then do something via a 'Matcher'.
@@ -1137,7 +1142,10 @@ matches = matchesOpt mempty
 
 -- | @matchesOpt mempty = matches@
 matchesOpt :: Option -> Text -> Text -> Bool
-matchesOpt = withMatcher $ \matcher -> has $ _capturesInternal matcher []
+matchesOpt = withMatcher $ \matcher -> has $ _capturesInternal
+    matcher
+    (const $ return $ noTouchy :| noTouchy)
+    noTouchy
 
 -- | Match a pattern to a subject once and return the portion that matched in an
 -- `Alternative`, or `empty` if no match.
@@ -1231,18 +1239,20 @@ _captures = _capturesOpt mempty
 
 -- | @_capturesOpt mempty = _captures@
 _capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
-_capturesOpt = withMatcher $ \matcher -> _capturesInternal matcher [0 ..]
+_capturesOpt = withMatcher $ \matcher ->
+    _capturesInternal matcher getAllSliceRanges slice
 
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
 -- a subject to the portions of it that match.
 --
--- Equivalent to @\\patt -> `_captures` patt . ix 0@, but more efficient.
+-- @_match = `_captures` patt . ix 0@
 _match :: Text -> Traversal' Text Text
 _match = _matchOpt mempty
 
 -- | @_matchOpt mempty = _match@
 _matchOpt :: Option -> Text -> Traversal' Text Text
-_matchOpt = withMatcher $ \matcher -> _capturesInternal matcher [0] . _headNE
+_matchOpt = withMatcher $ \matcher ->
+    _capturesInternal matcher get0thSliceRanges slice . _headNE
 
 -- * Support for Template Haskell compile-time regex analysis
 

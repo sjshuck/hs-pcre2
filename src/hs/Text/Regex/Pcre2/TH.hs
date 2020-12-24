@@ -7,7 +7,7 @@ module Text.Regex.Pcre2.TH where
 import           Control.Applicative        (Alternative(..))
 import           Data.IORef
 import           Data.Functor               ((<&>))
-import           Data.List.NonEmpty         (NonEmpty)
+import           Data.List.NonEmpty         (NonEmpty(..))
 import qualified Data.List.NonEmpty         as NE
 import           Data.Map.Lazy              (Map)
 import qualified Data.Map.Lazy              as Map
@@ -103,31 +103,39 @@ regex :: QuasiQuoter
 regex = QuasiQuoter {
     quoteExp = \s -> capturesInfoQ s >>= \case
         Nothing -> [e|
-            let _cs = _capturesInternal $(matcherQ s) [0]
+            let _cs = _capturesInternal $(matcherQ s) get0thSliceRanges slice
             in toAlternativeOf $ _cs . _headNE |]
         Just info -> [e|
-            let wrap cs = Captures cs :: Captures $(return info)
-                _cs = _capturesInternal $(matcherQ s) [0 ..]
+            let _cs = _capturesInternal $(matcherQ s) getAllSliceRanges slice
+                wrap cs = Captures cs :: Captures $(return info)
             in toAlternativeOf $ _cs . to wrap |],
 
     quotePat = \s -> do
         captureNames <- predictCaptureNamesQ s
 
-        case toKVs captureNames of
+        case NE.nonEmpty $ toKVs captureNames of
             -- No named captures.  Test whether the string matches without
             -- creating any new Text values.
-            [] -> viewP
-                [e| has $ _capturesInternal $(matcherQ s) [] |]
+            Nothing -> viewP
+                [e|
+                    has $ _capturesInternal
+                        $(matcherQ s)
+                        (const $ return $ noTouchy :| noTouchy)
+                        noTouchy |]
                 [p| True |]
 
             -- One or more named captures.  Attempt to bind only those to local
             -- variables of the same names.
-            numberedNames -> viewP e p where
-                (nums, names) = unzip numberedNames
+            Just numberedNames -> viewP e p where
+                (numbers, names) = NE.unzip numberedNames
                 e = [e|
-                    let _cs = _capturesInternal $(matcherQ s) $(liftData nums)
-                    in maybe [] NE.toList . preview _cs |]
-                p = listP $ map (varP . mkName . Text.unpack) names,
+                    let _cs = _capturesInternal
+                            $(matcherQ s)
+                            (getWhitelistedSliceRanges $(liftData numbers))
+                            slice
+                    in view $ _cs . to NE.toList |]
+                p = foldr f wildP names where
+                    f name r = conP '(:) [varP $ mkName $ Text.unpack name, r],
 
     quoteType = const $ fail "regex: cannot produce a type",
 
@@ -152,11 +160,14 @@ regex = QuasiQuoter {
 _regex :: QuasiQuoter
 _regex = QuasiQuoter {
     quoteExp = \s -> capturesInfoQ s >>= \case
-        Nothing   -> [e| _capturesInternal $(matcherQ s) [0] . _headNE |]
+        Nothing -> [e|
+            let _cs = _capturesInternal $(matcherQ s) get0thSliceRanges slice
+            in _cs . _headNE |]
         Just info -> [e|
-            let wrapped :: Lens' (NonEmpty Text) (Captures $(return info))
+            let _cs = _capturesInternal $(matcherQ s) getAllSliceRanges slice
+                wrapped :: Lens' (NonEmpty Text) (Captures $(return info))
                 wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
-            in _capturesInternal $(matcherQ s) [0 ..] . wrapped |],
+            in _cs . wrapped |],
 
     quotePat = const $ fail "_regex: cannot produce a pattern",
 
