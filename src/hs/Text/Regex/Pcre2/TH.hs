@@ -5,8 +5,8 @@
 module Text.Regex.Pcre2.TH where
 
 import           Control.Applicative        (Alternative(..))
-import           Data.IORef
 import           Data.Functor               ((<&>))
+import           Data.IORef
 import           Data.List.NonEmpty         (NonEmpty(..))
 import qualified Data.List.NonEmpty         as NE
 import           Data.Map.Lazy              (Map)

@@ -37,14 +37,12 @@ import qualified Data.Text.Foreign          as Text
 import           Data.Type.Bool             (If, type (||))
 import           Data.Type.Equality         (type (==))
 import           Data.Typeable              (cast)
+import           Data.Void                  (Void, absurd)
 import           Foreign
 import           Foreign.C.Types
 import qualified Foreign.Concurrent         as Conc
 import           GHC.TypeLits               hiding (Text)
 import qualified GHC.TypeLits               as TypeLits
-import           Streaming                  (Of(..), Stream)
-import qualified Streaming
-import qualified Streaming.Prelude          as Streaming
 import           System.IO.Unsafe
 import           Text.Regex.Pcre2.Foreign
 
@@ -151,17 +149,74 @@ toAlternativeOf l = getAlt . view (l . to (Alt . pure))
 _headNE :: Lens' (NonEmpty a) a
 _headNE f (x :| xs) = f x <&> \x' -> x' :| xs
 
+-- ** Streaming support
+
+-- | A @FreeT@-style stream that can short-circuit.
+data Stream b m a
+    = StreamPure a
+    | StreamYield b (Stream b m a)    -- ^ yield a value and keep going
+    | StreamEffect (m (Stream b m a)) -- ^ have an effect and keep going
+    | StreamStop                      -- ^ short-circuit
+
+instance (Functor m) => Functor (Stream b m) where
+    f `fmap` StreamPure x     = StreamPure $ f x
+    f `fmap` StreamYield y sx = StreamYield y $ f <$> sx
+    f `fmap` StreamEffect msx = StreamEffect $ fmap f <$> msx
+    _ `fmap` StreamStop       = StreamStop
+
+instance (Functor m) => Applicative (Stream b m) where
+    pure = StreamPure
+    StreamPure f     <*> sx = f <$> sx
+    StreamYield y sf <*> sx = StreamYield y $ sf <*> sx
+    StreamEffect msf <*> sx = StreamEffect $ msf <&> (<*> sx)
+    StreamStop       <*> _  = StreamStop
+
+instance (Functor m) => Monad (Stream b m) where
+    return = pure
+    StreamPure x     >>= f = f x
+    StreamYield y sx >>= f = StreamYield y $ sx >>= f
+    StreamEffect msx >>= f = StreamEffect $ msx <&> (>>= f)
+    StreamStop       >>= _ = StreamStop
+
+instance MonadTrans (Stream b) where
+    lift = StreamEffect . fmap StreamPure
+
+instance (MonadIO m) => MonadIO (Stream b m) where
+    liftIO = lift . liftIO
+
+-- | Yield a value in the stream.
+yields :: (Applicative m) => b -> Stream b m ()
+yields x = StreamYield x $ pure ()
+
+-- | Effectfully transform yielded values.
+mapsM :: (Functor m) => (b -> m c) -> Stream b m a -> Stream c m a
+mapsM f = fix $ \continue -> \case
+    StreamPure x     -> StreamPure x
+    StreamEffect ms  -> StreamEffect $ continue <$> ms
+    StreamStop       -> StreamStop
+    StreamYield y sx -> StreamEffect $ f y <&> \y' ->
+        StreamYield y' $ continue sx
+
+-- | Unsafely, lazily tear down a `Stream` into a pure list of values yielded.
+-- The stream must be infinite in the sense of it only terminating due to
+-- explicit `StreamStop`.
+unsafeLazyRunStream :: Stream b IO Void -> [b]
+unsafeLazyRunStream (StreamPure v)    = absurd v
+unsafeLazyRunStream (StreamYield x s) = x : unsafeLazyRunStream s
+unsafeLazyRunStream (StreamEffect ms) = unsafeLazyRunStream $ unsafePerformIO ms
+unsafeLazyRunStream StreamStop        = []
+
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
 -- | A matching function where all inputs and auxilliary data structures have
--- been \"compiled\".  It takes a subject a produces a finite stream of match
--- results corresponding to a global match.
+-- been \"compiled\".  It takes a subject a produces a stream of match results
+-- corresponding to a global match.
 --
 -- The actual values of type @Ptr Pcre2_match_data@ will be equal within each
 -- global match; they represent the states of the C data at moments in time, and
 -- are intended to be composed with another streaming transformation before
 -- being subjected to teardown and `unsafePerformIO`.
-type Matcher = Text -> Stream (Of (Ptr Pcre2_match_data)) IO ()
+type Matcher = Text -> Stream (Ptr Pcre2_match_data) IO Void
 
 -- | A substitution function.  It takes a subject and produces the number of
 -- substitutions performed (0 or 1, or more in the presence of `SubGlobal`)
@@ -689,7 +744,7 @@ assembleSubjFun mkSubjFun option patt =
 assembleMatcher :: Option -> Text -> IO Matcher
 assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
     let matchTempEnvWithSubj = mkMatchTempEnv matchEnv
-    in \subject -> Streaming.effect $
+    in \subject -> StreamEffect $
         withForeignPtr matchEnvCode $ \codePtr ->
         withMatchDataFromCode codePtr $ \matchDataPtr ->
         Text.useAsPtr subject $ \subjPtr subjCUs -> do
@@ -709,25 +764,24 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
                             ctxPtr
 
                 -- Handle no match and errors
-                unless (result == pcre2_ERROR_NOMATCH) $ do
-                    when (result == pcre2_ERROR_CALLOUT) $
-                        liftIO $ maybeRethrow matchTempEnvRef
-                    liftIO $ check (> 0) result
+                when (result == pcre2_ERROR_NOMATCH) StreamStop
+                when (result == pcre2_ERROR_CALLOUT) $
+                    liftIO $ maybeRethrow matchTempEnvRef
+                liftIO $ check (> 0) result
 
-                    Streaming.yield matchDataPtr
+                yields matchDataPtr
 
-                    -- Determine next starting offset
-                    nextOff <- liftIO $ do
-                        ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
-                        curOffEnd <- peekElemOff ovecPtr 1
-                        -- Prevent infinite loop upon empty match
-                        return $ max curOffEnd (curOff + 1)
+                -- Determine next starting offset
+                nextOff <- liftIO $ do
+                    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+                    curOffEnd <- peekElemOff ovecPtr 1
+                    -- Prevent infinite loop upon empty match
+                    return $ max curOffEnd (curOff + 1)
 
-                    -- Handle end of subject
-                    unless (nextOff > fromIntegral subjCUs) $
-                        -- Force slices out of the current match_data state
-                        -- before clobbering it with the next match
-                        continue nextOff
+                -- Handle end of subject
+                when (nextOff > fromIntegral subjCUs) StreamStop
+
+                continue nextOff
 
     where
     withMatchDataFromCode codePtr action = do
@@ -1039,11 +1093,8 @@ _capturesInternal matcher getSliceRanges slicer f subject =
         in Text.concat $ foldr mkSegments termSegments triples 0
 
     where
-    sliceRangeLists = Streaming.destroy
-        (Streaming.mapM getSliceRanges $ matcher subject)
-        (\(srs :> srss) -> srs : srss)
-        unsafePerformIO
-        (const [])
+    sliceRangeLists = unsafeLazyRunStream $
+            mapsM getSliceRanges $ matcher subject
     captureLists = map (NE.map $ slicer subject) sliceRangeLists
 
     mkSegments (SliceRange off offEnd, c, c') r prevOffEnd
