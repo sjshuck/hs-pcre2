@@ -315,7 +315,7 @@ module Text.Regex.Pcre2 (
     Newline(..),
 
     -- ** Callout interface
-    -- *** Capture callouts
+
     CalloutInfo(..),
     CalloutIndex(..),
     CalloutResult(..),

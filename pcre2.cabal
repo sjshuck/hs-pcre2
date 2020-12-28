@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 59ef57516a0657d661f19dafd5afd97472da24119ee5d5d31c7681834b8c303a
+-- hash: f1ad7cfbc1a7c416e4c7e30ed883742b5ff469c3ad83f1f2d7da0d7ec2189da2
 
 name:           pcre2
 version:        1.1.2
@@ -83,10 +83,9 @@ extra-source-files:
     src/c/pcre2/src/sljit/sljitNativePPC_32.c
     src/c/pcre2/src/sljit/sljitNativePPC_64.c
     src/c/pcre2/src/sljit/sljitNativePPC_common.c
+    src/c/pcre2/src/sljit/sljitNativeS390X.c
     src/c/pcre2/src/sljit/sljitNativeSPARC_32.c
     src/c/pcre2/src/sljit/sljitNativeSPARC_common.c
-    src/c/pcre2/src/sljit/sljitNativeTILEGX-encoder.c
-    src/c/pcre2/src/sljit/sljitNativeTILEGX_64.c
     src/c/pcre2/src/sljit/sljitNativeX86_32.c
     src/c/pcre2/src/sljit/sljitNativeX86_64.c
     src/c/pcre2/src/sljit/sljitNativeX86_common.c

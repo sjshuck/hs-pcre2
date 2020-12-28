@@ -285,8 +285,9 @@ data Option
     | Ungreedy -- ^ Invert the effect of @?@.  Without it, quantifiers are
     -- non-greedy; with it, they are greedy.  Equivalent to @(?U)@.
     | UnsafeCallout (CalloutInfo -> IO CalloutResult) -- ^ Run the given callout
-    -- on every capture.  Multiples of this option before the rightmost are
-    -- ignored.
+    -- at every callout point
+    -- (see [the docs](https://pcre.org/current/doc/html/pcre2callout.html) for
+    -- more info).  Multiples of this option before the rightmost are ignored.
     --
     -- /NOTE: The callout is run via `unsafePerformIO` within pure code!/
     | UnsafeCompileRecGuard (Int -> IO Bool) -- ^ Run the given guard on every
@@ -366,8 +367,7 @@ newlineToC NewlineNul     = pcre2_NEWLINE_NUL
 -- | Input for user-defined callouts.
 data CalloutInfo
     = CalloutInfo {
-        -- | The index of which capture we\'re on.  Note that callouts are never
-        -- run for the 0th capture.
+        -- | The index of which callout point we\'re on.
         calloutIndex :: CalloutIndex,
         -- | The captures that have been set so far.
         calloutCaptures :: NonEmpty (Maybe Text),
@@ -385,8 +385,8 @@ data CalloutInfo
 
 -- | What caused the callout.
 data CalloutIndex
-    = CalloutNumber Int -- ^ Numbered capture.
-    | CalloutName Text -- ^ Named capture.
+    = CalloutNumber Int -- ^ Numerical callout.
+    | CalloutName Text -- ^ String callout.
     | CalloutAuto Int Int -- ^ The item located at this half-open range of
     -- offsets within the pattern.  See `AutoCallout`.
     deriving (Show, Eq)
@@ -970,9 +970,9 @@ getCalloutInfo subject blockPtr = do
                 -- TODO Replace this with a more obviously best way to slurp a
                 -- zero-terminated region of memory into a `Text`, given
                 -- whatever the pcre2callout spec means by "zero-terminated".
-                len <- fix1 0 $ \go off -> peekElemOff ptr off >>= \case
+                len <- fix1 0 $ \continue off -> peekElemOff ptr off >>= \case
                     0 -> return off
-                    _ -> go $ off + 1
+                    _ -> continue $ off + 1
                 Text.fromPtr (castCUs ptr) (fromIntegral len)
 
     flags <- pcre2_callout_block_callout_flags blockPtr
@@ -1062,10 +1062,9 @@ _capturesInternal matcher getSliceRanges slicer f subject =
         -- cases where no substring is changed.
         in [thinSlice subject (SliceRange off offEnd) | off /= offEnd]
 
--- | A function that takes a subject and a C match result, and extracts a
--- collection of captures.  We need to pass this effectful callback to
--- `_capturesInternal` because of the latter\'s tight, imperative loop that
--- reuses the same @pcre2_match_data@ block.
+-- | A function that takes a C match result and extracts a list of captures.  We
+-- need to pass this effectful callback to `_capturesInternal` because of the
+-- latter\'s imperative loop that reuses the same @pcre2_match_data@ block.
 type FromMatch = Ptr Pcre2_match_data -> IO (NonEmpty SliceRange)
 
 -- | Read all specifically indexed captures\' offsets from match results.
