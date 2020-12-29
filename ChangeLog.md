@@ -1,5 +1,11 @@
 # Changelog and Acknowledgements
 
+## 1.1.3
+* Made in-house streaming abstraction based on `streaming` and removed the
+  latter as a dependency.
+* Updated PCRE2 to 10.36 (no API changes).
+* Docs fixes.
+
 ## 1.1.2
 * Refactored using the `streaming` library.  Fixed
   [#11](https://github.com/sjshuck/pcre2/11), where large global matches were

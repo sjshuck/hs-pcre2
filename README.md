@@ -52,15 +52,18 @@ forMOf kv'd file $ execStateT $ do
 * Bundled, statically-linked UTF-16 build of up-to-date PCRE2 (version 10.36),
   with a complete, exposed Haskell binding.
 
-## TODO
+## Wishlist
 * Many performance optimizations.  Currently we are as much as 2&ndash;3&times;
-  slower than other libraries doing some things, although we are now on par with
-  `regex-base`/`regex-pcre` (faster working with `Text`). If it really is regex
-  processing that's causing a bottleneck,
-  [`pcre-light`](https://hackage.haskell.org/package/pcre-light) is recommended
-  instead of `pcre2` for the very best performance.
+  slower than other libraries for some operations, although things are
+  improving.  (We are already faster than
+  [regex-base](https://hackage.haskell.org/package/regex-base)/[regex-pcre](https://hackage.haskell.org/package/regex-pcre)
+  when working with `Text`.)  If it's really regex processing that's causing a
+  bottleneck,
+  [pcre-light](https://hackage.haskell.org/package/pcre-light)/[-heavy](https://hackage.haskell.org/package/pcre-heavy)/[lens-regex-pcre](https://hackage.haskell.org/package/lens-regex-pcre)
+  are recommended instead of this library for the very best performance.
 * Make use of DFA and JIT compilation.
 * Improve PCRE2 C compile time.
+* Add splitting support.
 
 ## License
 [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0.html).  
