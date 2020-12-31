@@ -120,7 +120,7 @@ regex = QuasiQuoter {
                 [e|
                     has $ _capturesInternal
                         $(matcherQ s)
-                        (const $ return $ noTouchy :| noTouchy)
+                        (const $ return noTouchy)
                         noTouchy |]
                 [p| True |]
 

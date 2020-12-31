@@ -1,7 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PolyKinds #-}
@@ -184,27 +183,29 @@ instance MonadTrans (Stream b) where
 instance (MonadIO m) => MonadIO (Stream b m) where
     liftIO = lift . liftIO
 
--- | Yield a value in the stream.
-yields :: (Applicative m) => b -> Stream b m ()
-yields x = StreamYield x $ pure ()
+yield :: b -> Stream b m ()
+yield y = StreamYield y $ StreamPure ()
+
+stop :: Stream b m a
+stop = StreamStop
 
 -- | Effectfully transform yielded values.
-mapsM :: (Functor m) => (b -> m c) -> Stream b m a -> Stream c m a
-mapsM f = fix $ \continue -> \case
+mapMS :: (Functor m) => (b -> m c) -> Stream b m a -> Stream c m a
+mapMS f = fix $ \go -> \case
     StreamPure x     -> StreamPure x
-    StreamEffect ms  -> StreamEffect $ continue <$> ms
+    StreamYield y sx -> StreamEffect $ f y <&> \y' -> StreamYield y' $ go sx
+    StreamEffect ms  -> StreamEffect $ go <$> ms
     StreamStop       -> StreamStop
-    StreamYield y sx -> StreamEffect $ f y <&> \y' ->
-        StreamYield y' $ continue sx
 
 -- | Unsafely, lazily tear down a `Stream` into a pure list of values yielded.
 -- The stream must be infinite in the sense of it only terminating due to
--- explicit `StreamStop`.
+-- explicit `stop`.
 unsafeLazyRunStream :: Stream b IO Void -> [b]
-unsafeLazyRunStream (StreamPure v)    = absurd v
-unsafeLazyRunStream (StreamYield x s) = x : unsafeLazyRunStream s
-unsafeLazyRunStream (StreamEffect ms) = unsafeLazyRunStream $ unsafePerformIO ms
-unsafeLazyRunStream StreamStop        = []
+unsafeLazyRunStream = fix $ \continue -> \case
+    StreamPure v    -> absurd v
+    StreamYield y s -> y : continue s
+    StreamEffect ms -> continue $ unsafePerformIO ms
+    StreamStop      -> []
 
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
@@ -764,12 +765,12 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
                             ctxPtr
 
                 -- Handle no match and errors
-                when (result == pcre2_ERROR_NOMATCH) StreamStop
+                when (result == pcre2_ERROR_NOMATCH) stop
                 when (result == pcre2_ERROR_CALLOUT) $
                     liftIO $ maybeRethrow matchTempEnvRef
                 liftIO $ check (> 0) result
 
-                yields matchDataPtr
+                yield matchDataPtr
 
                 -- Determine next starting offset
                 nextOff <- liftIO $ do
@@ -779,7 +780,7 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
                     return $ max curOffEnd (curOff + 1)
 
                 -- Handle end of subject
-                when (nextOff > fromIntegral subjCUs) StreamStop
+                when (nextOff > fromIntegral subjCUs) stop
 
                 continue nextOff
 
@@ -1094,7 +1095,7 @@ _capturesInternal matcher getSliceRanges slicer f subject =
 
     where
     sliceRangeLists = unsafeLazyRunStream $
-            mapsM getSliceRanges $ matcher subject
+        mapMS getSliceRanges $ matcher subject
     captureLists = map (NE.map $ slicer subject) sliceRangeLists
 
     mkSegments (SliceRange off offEnd, c, c') r prevOffEnd
@@ -1194,7 +1195,7 @@ matches = matchesOpt mempty
 matchesOpt :: Option -> Text -> Text -> Bool
 matchesOpt = withMatcher $ \matcher -> has $ _capturesInternal
     matcher
-    (const $ return $ noTouchy :| noTouchy)
+    (const $ return noTouchy)
     noTouchy
 
 -- | Match a pattern to a subject once and return the portion that matched in an

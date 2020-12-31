@@ -1,5 +1,9 @@
 # Changelog and Acknowledgements
 
+## 1.1.3.1
+* Fixed a very minor issue where `pcreVersion` still reported "10.35" even
+  though it in fact was using 10.36.
+
 ## 1.1.3
 * Made in-house streaming abstraction based on `streaming` and removed the
   latter as a dependency.
