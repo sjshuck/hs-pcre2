@@ -75,15 +75,15 @@ foreign import capi safe "pcre2.h" pcre2_compile_context_free
 -- ** Compile context setters
 
 -- TODO Maybe this goes next to wherever errors appear in the docs?
-constant "ERROR_BADDATA" ''CInt
+constant ''CInt "ERROR_BADDATA"
 
 foreign import capi unsafe "pcre2.h" pcre2_set_bsr
     :: Ptr Pcre2_compile_context
     -> CUInt -- ^ See below for possible values.
     -> IO CInt
 
-constant "BSR_ANYCRLF" ''CUInt
-constant "BSR_UNICODE" ''CUInt
+constant ''CUInt "BSR_ANYCRLF"
+constant ''CUInt "BSR_UNICODE"
 
 foreign import capi "pcre2.h" pcre2_set_character_tables
     :: Ptr Pcre2_compile_context
@@ -105,12 +105,12 @@ foreign import capi unsafe "pcre2.h" pcre2_set_newline
     -> CUInt -- ^ See below for possible values.
     -> IO CInt
 
-constant "NEWLINE_CR" ''CUInt
-constant "NEWLINE_LF" ''CUInt
-constant "NEWLINE_CRLF" ''CUInt
-constant "NEWLINE_ANY" ''CUInt
-constant "NEWLINE_ANYCRLF" ''CUInt
-constant "NEWLINE_NUL" ''CUInt
+constant ''CUInt "NEWLINE_CR"
+constant ''CUInt "NEWLINE_LF"
+constant ''CUInt "NEWLINE_CRLF"
+constant ''CUInt "NEWLINE_ANY"
+constant ''CUInt "NEWLINE_ANYCRLF"
+constant ''CUInt "NEWLINE_NUL"
 
 foreign import capi unsafe "pcre2.h" pcre2_set_parens_nest_limit
     :: Ptr Pcre2_compile_context
@@ -156,7 +156,7 @@ foreign import capi unsafe "pcre2.h" pcre2_set_offset_limit
     -> PCRE2_SIZE -- ^ Can be unset.  See below.
     -> IO CInt
 
-constant "UNSET" ''PCRE2_SIZE
+constant ''PCRE2_SIZE "UNSET"
 
 foreign import capi unsafe "pcre2.h" pcre2_set_heap_limit
     :: Ptr Pcre2_match_context
@@ -180,22 +180,22 @@ foreign import capi unsafe "pcre2.h" pcre2_config
     -> Ptr a   -- ^ See the C API docs for what gets returned here.
     -> IO CInt
 
-constant "CONFIG_BSR" ''CUInt
-constant "CONFIG_COMPILED_WIDTHS" ''CUInt
-constant "CONFIG_DEPTHLIMIT" ''CUInt
-constant "CONFIG_HEAPLIMIT" ''CUInt
-constant "CONFIG_JIT" ''CUInt
-constant "CONFIG_JITTARGET" ''CUInt
-constant "CONFIG_LINKSIZE" ''CUInt
-constant "CONFIG_MATCHLIMIT" ''CUInt
-constant "CONFIG_NEWLINE" ''CUInt
-constant "CONFIG_NEVER_BACKSLASH_C" ''CUInt
-constant "CONFIG_PARENSLIMIT" ''CUInt
-constant "CONFIG_STACKRECURSE" ''CUInt
-constant "CONFIG_TABLES_LENGTH" ''CUInt
-constant "CONFIG_UNICODE_VERSION" ''CUInt
-constant "CONFIG_UNICODE" ''CUInt
-constant "CONFIG_VERSION" ''CUInt
+constant ''CUInt "CONFIG_BSR"
+constant ''CUInt "CONFIG_COMPILED_WIDTHS"
+constant ''CUInt "CONFIG_DEPTHLIMIT"
+constant ''CUInt "CONFIG_HEAPLIMIT"
+constant ''CUInt "CONFIG_JIT"
+constant ''CUInt "CONFIG_JITTARGET"
+constant ''CUInt "CONFIG_LINKSIZE"
+constant ''CUInt "CONFIG_MATCHLIMIT"
+constant ''CUInt "CONFIG_NEWLINE"
+constant ''CUInt "CONFIG_NEVER_BACKSLASH_C"
+constant ''CUInt "CONFIG_PARENSLIMIT"
+constant ''CUInt "CONFIG_STACKRECURSE"
+constant ''CUInt "CONFIG_TABLES_LENGTH"
+constant ''CUInt "CONFIG_UNICODE_VERSION"
+constant ''CUInt "CONFIG_UNICODE"
+constant ''CUInt "CONFIG_VERSION"
 
 -- * Compiling a pattern
 
@@ -209,7 +209,7 @@ foreign import capi safe "pcre2.h" pcre2_compile
     -> Ptr Pcre2_compile_context
     -> IO (Ptr Pcre2_code)
 
-constant "ZERO_TERMINATED" ''PCRE2_SIZE
+constant ''PCRE2_SIZE "ZERO_TERMINATED"
 
 foreign import capi safe "pcre2.h" pcre2_code_free
     :: Ptr Pcre2_code
@@ -224,44 +224,44 @@ foreign import capi "pcre2.h" pcre2_code_copy_with_tables
     -> IO (Ptr Pcre2_code)
 
 -- ** Main compile options
-constant "ANCHORED" ''CUInt
-constant "ALLOW_EMPTY_CLASS" ''CUInt
-constant "ALT_BSUX" ''CUInt
-constant "ALT_CIRCUMFLEX" ''CUInt
-constant "ALT_VERBNAMES" ''CUInt
-constant "AUTO_CALLOUT" ''CUInt
-constant "CASELESS" ''CUInt
-constant "DOLLAR_ENDONLY" ''CUInt
-constant "DOTALL" ''CUInt
-constant "DUPNAMES" ''CUInt
-constant "ENDANCHORED" ''CUInt
-constant "EXTENDED" ''CUInt
-constant "EXTENDED_MORE" ''CUInt
-constant "FIRSTLINE" ''CUInt
-constant "LITERAL" ''CUInt
-constant "MATCH_INVALID_UTF" ''CUInt
-constant "MATCH_UNSET_BACKREF" ''CUInt
-constant "MULTILINE" ''CUInt
-constant "NEVER_BACKSLASH_C" ''CUInt
-constant "NEVER_UCP" ''CUInt
-constant "NEVER_UTF" ''CUInt
-constant "NO_AUTO_CAPTURE" ''CUInt
-constant "NO_AUTO_POSSESS" ''CUInt
-constant "NO_DOTSTAR_ANCHOR" ''CUInt
-constant "NO_START_OPTIMIZE" ''CUInt
-constant "NO_UTF_CHECK" ''CUInt
-constant "UCP" ''CUInt
-constant "UNGREEDY" ''CUInt
-constant "USE_OFFSET_LIMIT" ''CUInt
-constant "UTF" ''CUInt
+constant ''CUInt "ANCHORED"
+constant ''CUInt "ALLOW_EMPTY_CLASS"
+constant ''CUInt "ALT_BSUX"
+constant ''CUInt "ALT_CIRCUMFLEX"
+constant ''CUInt "ALT_VERBNAMES"
+constant ''CUInt "AUTO_CALLOUT"
+constant ''CUInt "CASELESS"
+constant ''CUInt "DOLLAR_ENDONLY"
+constant ''CUInt "DOTALL"
+constant ''CUInt "DUPNAMES"
+constant ''CUInt "ENDANCHORED"
+constant ''CUInt "EXTENDED"
+constant ''CUInt "EXTENDED_MORE"
+constant ''CUInt "FIRSTLINE"
+constant ''CUInt "LITERAL"
+constant ''CUInt "MATCH_INVALID_UTF"
+constant ''CUInt "MATCH_UNSET_BACKREF"
+constant ''CUInt "MULTILINE"
+constant ''CUInt "NEVER_BACKSLASH_C"
+constant ''CUInt "NEVER_UCP"
+constant ''CUInt "NEVER_UTF"
+constant ''CUInt "NO_AUTO_CAPTURE"
+constant ''CUInt "NO_AUTO_POSSESS"
+constant ''CUInt "NO_DOTSTAR_ANCHOR"
+constant ''CUInt "NO_START_OPTIMIZE"
+constant ''CUInt "NO_UTF_CHECK"
+constant ''CUInt "UCP"
+constant ''CUInt "UNGREEDY"
+constant ''CUInt "USE_OFFSET_LIMIT"
+constant ''CUInt "UTF"
 
 -- ** Extra compile options
-constant "EXTRA_ALLOW_SURROGATE_ESCAPES" ''CUInt
-constant "EXTRA_ALT_BSUX" ''CUInt
-constant "EXTRA_BAD_ESCAPE_IS_LITERAL" ''CUInt
-constant "EXTRA_ESCAPED_CR_IS_LF" ''CUInt
-constant "EXTRA_MATCH_LINE" ''CUInt
-constant "EXTRA_MATCH_WORD" ''CUInt
+constant ''CUInt "EXTRA_ALLOW_SURROGATE_ESCAPES"
+constant ''CUInt "EXTRA_ALT_BSUX"
+constant ''CUInt "EXTRA_BAD_ESCAPE_IS_LITERAL"
+constant ''CUInt "EXTRA_ESCAPED_CR_IS_LF"
+constant ''CUInt "EXTRA_MATCH_LINE"
+constant ''CUInt "EXTRA_MATCH_WORD"
 
 -- * JIT compilation
 
@@ -270,12 +270,12 @@ foreign import capi safe "pcre2.h" pcre2_jit_compile
     -> CUInt -- ^ See below for possible bit flags.
     -> IO CInt
 
-constant "JIT_COMPLETE" ''CUInt
-constant "JIT_PARTIAL_HARD" ''CUInt
-constant "JIT_PARTIAL_SOFT" ''CUInt
+constant ''CUInt "JIT_COMPLETE"
+constant ''CUInt "JIT_PARTIAL_HARD"
+constant ''CUInt "JIT_PARTIAL_SOFT"
 
 -- | May be returned by 'pcre2_jit_compile'.
-constant "ERROR_JIT_BADOPTION" ''CInt
+constant ''CInt "ERROR_JIT_BADOPTION"
 
 foreign import capi safe "pcre2.h" pcre2_jit_match
     :: Ptr Pcre2_code
@@ -326,35 +326,35 @@ foreign import capi unsafe "pcre2.h" pcre2_pattern_info
     -> Ptr a
     -> IO CInt        -- ^ See below for possible error values.
 
-constant "INFO_ALLOPTIONS" ''CUInt
-constant "INFO_ARGOPTIONS" ''CUInt
-constant "INFO_EXTRAOPTIONS" ''CUInt
-constant "INFO_BACKREFMAX" ''CUInt
-constant "INFO_BSR" ''CUInt
-constant "INFO_CAPTURECOUNT" ''CUInt
-constant "INFO_DEPTHLIMIT" ''CUInt
-constant "INFO_FIRSTBITMAP"   ''CUInt
-constant "INFO_FIRSTCODETYPE" ''CUInt
-constant "INFO_FIRSTCODEUNIT" ''CUInt
-constant "INFO_FRAMESIZE" ''CUInt
-constant "INFO_HASBACKSLASHC" ''CUInt
-constant "INFO_HASCRORLF" ''CUInt
-constant "INFO_HEAPLIMIT" ''CUInt
-constant "INFO_JCHANGED" ''CUInt
-constant "INFO_JITSIZE" ''CUInt
-constant "INFO_LASTCODETYPE" ''CUInt
-constant "INFO_LASTCODEUNIT" ''CUInt
-constant "INFO_MATCHEMPTY" ''CUInt
-constant "INFO_MATCHLIMIT" ''CUInt
-constant "INFO_MAXLOOKBEHIND" ''CUInt
-constant "INFO_MINLENGTH" ''CUInt
-constant "INFO_NAMECOUNT" ''CUInt
-constant "INFO_NAMEENTRYSIZE" ''CUInt
-constant "INFO_NAMETABLE" ''CUInt
-constant "INFO_NEWLINE" ''CUInt
-constant "INFO_SIZE" ''CUInt
+constant ''CUInt "INFO_ALLOPTIONS"
+constant ''CUInt "INFO_ARGOPTIONS"
+constant ''CUInt "INFO_EXTRAOPTIONS"
+constant ''CUInt "INFO_BACKREFMAX"
+constant ''CUInt "INFO_BSR"
+constant ''CUInt "INFO_CAPTURECOUNT"
+constant ''CUInt "INFO_DEPTHLIMIT"
+constant ''CUInt "INFO_FIRSTBITMAP"
+constant ''CUInt "INFO_FIRSTCODETYPE"
+constant ''CUInt "INFO_FIRSTCODEUNIT"
+constant ''CUInt "INFO_FRAMESIZE"
+constant ''CUInt "INFO_HASBACKSLASHC"
+constant ''CUInt "INFO_HASCRORLF"
+constant ''CUInt "INFO_HEAPLIMIT"
+constant ''CUInt "INFO_JCHANGED"
+constant ''CUInt "INFO_JITSIZE"
+constant ''CUInt "INFO_LASTCODETYPE"
+constant ''CUInt "INFO_LASTCODEUNIT"
+constant ''CUInt "INFO_MATCHEMPTY"
+constant ''CUInt "INFO_MATCHLIMIT"
+constant ''CUInt "INFO_MAXLOOKBEHIND"
+constant ''CUInt "INFO_MINLENGTH"
+constant ''CUInt "INFO_NAMECOUNT"
+constant ''CUInt "INFO_NAMEENTRYSIZE"
+constant ''CUInt "INFO_NAMETABLE"
+constant ''CUInt "INFO_NEWLINE"
+constant ''CUInt "INFO_SIZE"
 
-constant "ERROR_UNSET" ''CInt
+constant ''CInt "ERROR_UNSET"
 
 -- ** Duplicate capture group names
 foreign import capi unsafe "pcre2.h" pcre2_substring_nametable_scan
@@ -380,50 +380,44 @@ foreign import capi safe "pcre2.h" pcre2_callout_enumerate
 -- cannot yet do that as of GHC 8.8.4.
 
 -- *** @pcre2_callout_block@
-getter "callout_block" "version" ''CUInt
-getter "callout_block" "callout_number" ''CUInt
-getter "callout_block" "capture_top" ''CUInt
-getter "callout_block" "capture_last" ''CUInt
-getter "callout_block" "callout_flags" ''CUInt
+getter "callout_block" [t| CUInt |] "version"
+getter "callout_block" [t| CUInt |] "callout_number"
+getter "callout_block" [t| CUInt |] "capture_top"
+getter "callout_block" [t| CUInt |] "capture_last"
+getter "callout_block" [t| CUInt |] "callout_flags"
 -- ^ See below for possible bit flags.
-constant "CALLOUT_STARTMATCH" ''CUInt
-constant "CALLOUT_BACKTRACK" ''CUInt
-foreign import capi unsafe "getters.h" pcre2_callout_block_offset_vector
-    :: Ptr Pcre2_callout_block
-    -> IO (Ptr PCRE2_SIZE)
-getter "callout_block" "mark" ''PCRE2_SPTR
-getter "callout_block" "subject" ''PCRE2_SPTR
-getter "callout_block" "subject_length" ''PCRE2_SIZE
-getter "callout_block" "start_match" ''PCRE2_SIZE
-getter "callout_block" "current_position" ''PCRE2_SIZE
-getter "callout_block" "pattern_position" ''PCRE2_SIZE
-getter "callout_block" "next_item_length" ''PCRE2_SIZE
-getter "callout_block" "callout_string_offset" ''PCRE2_SIZE
-getter "callout_block" "callout_string_length" ''PCRE2_SIZE
-getter "callout_block" "callout_string" ''PCRE2_SPTR
+constant ''CUInt "CALLOUT_STARTMATCH"
+constant ''CUInt "CALLOUT_BACKTRACK"
+getter "callout_block" [t| Ptr PCRE2_SIZE |] "offset_vector"
+getter "callout_block" [t| PCRE2_SPTR |]     "mark"
+getter "callout_block" [t| PCRE2_SPTR |]     "subject"
+getter "callout_block" [t| PCRE2_SIZE |]     "subject_length"
+getter "callout_block" [t| PCRE2_SIZE |]     "start_match"
+getter "callout_block" [t| PCRE2_SIZE |]     "current_position"
+getter "callout_block" [t| PCRE2_SIZE |]     "pattern_position"
+getter "callout_block" [t| PCRE2_SIZE |]     "next_item_length"
+getter "callout_block" [t| PCRE2_SIZE |]     "callout_string_offset"
+getter "callout_block" [t| PCRE2_SIZE |]     "callout_string_length"
+getter "callout_block" [t| PCRE2_SPTR |]     "callout_string"
 
 -- *** @pcre2_callout_enumerate_block@
-getter "callout_enumerate_block" "version" ''CUInt
-getter "callout_enumerate_block" "pattern_position" ''PCRE2_SIZE
-getter "callout_enumerate_block" "next_item_length" ''PCRE2_SIZE
-getter "callout_enumerate_block" "callout_number" ''CUInt
-getter "callout_enumerate_block" "callout_string_offset" ''PCRE2_SIZE
-getter "callout_enumerate_block" "callout_string_length" ''PCRE2_SIZE
-getter "callout_enumerate_block" "callout_string" ''PCRE2_SPTR
+getter "callout_enumerate_block" [t| CUInt |]      "version"
+getter "callout_enumerate_block" [t| PCRE2_SIZE |] "pattern_position"
+getter "callout_enumerate_block" [t| PCRE2_SIZE |] "next_item_length"
+getter "callout_enumerate_block" [t| CUInt |]      "callout_number"
+getter "callout_enumerate_block" [t| PCRE2_SIZE |] "callout_string_offset"
+getter "callout_enumerate_block" [t| PCRE2_SIZE |] "callout_string_length"
+getter "callout_enumerate_block" [t| PCRE2_SPTR |] "callout_string"
 
 -- *** @pcre2_substitute_callout_block@
-getter "substitute_callout_block" "version" ''CUInt
-getter "substitute_callout_block" "subscount" ''CUInt
-getter "substitute_callout_block" "input" ''PCRE2_SPTR
-getter "substitute_callout_block" "output" ''PCRE2_SPTR
-foreign import capi unsafe "getters.h" pcre2_substitute_callout_block_ovector
-    :: Ptr Pcre2_substitute_callout_block
-    -> IO (Ptr PCRE2_SIZE)
-getter "substitute_callout_block" "oveccount" ''CUInt
-foreign import capi unsafe "getters.h"
-    pcre2_substitute_callout_block_output_offsets
-        :: Ptr Pcre2_substitute_callout_block
-        -> IO (Ptr PCRE2_SIZE) -- ^ Array of 2 (@PCRE2_SIZE[2]@)
+getter "substitute_callout_block" [t| CUInt |]          "version"
+getter "substitute_callout_block" [t| CUInt |]          "subscount"
+getter "substitute_callout_block" [t| PCRE2_SPTR |]     "input"
+getter "substitute_callout_block" [t| PCRE2_SPTR |]     "output"
+getter "substitute_callout_block" [t| Ptr PCRE2_SIZE |] "ovector"
+getter "substitute_callout_block" [t| CUInt |]          "oveccount"
+getter "substitute_callout_block" [t| Ptr PCRE2_SIZE |] "output_offsets"
+-- ^ Array of 2 (@PCRE2_SIZE[2]@)
 
 -- * The match data block
 
@@ -454,39 +448,39 @@ foreign import capi safe "pcre2.h" pcre2_match
     -> IO CInt
 
 -- ** Match options
-constant "COPY_MATCHED_SUBJECT" ''CUInt
-constant "NOTBOL" ''CUInt
-constant "NOTEOL" ''CUInt
-constant "NOTEMPTY" ''CUInt
-constant "NOTEMPTY_ATSTART" ''CUInt
-constant "NO_JIT" ''CUInt
-constant "PARTIAL_HARD" ''CUInt
-constant "PARTIAL_SOFT" ''CUInt
+constant ''CUInt "COPY_MATCHED_SUBJECT"
+constant ''CUInt "NOTBOL"
+constant ''CUInt "NOTEOL"
+constant ''CUInt "NOTEMPTY"
+constant ''CUInt "NOTEMPTY_ATSTART"
+constant ''CUInt "NO_JIT"
+constant ''CUInt "PARTIAL_HARD"
+constant ''CUInt "PARTIAL_SOFT"
 
 -- ** Match errors
-constant "ERROR_NOMATCH" ''CInt
-constant "ERROR_PARTIAL" ''CInt
-constant "ERROR_BADMAGIC" ''CInt
-constant "ERROR_BADMODE" ''CInt
-constant "ERROR_BADOFFSET" ''CInt
-constant "ERROR_BADOPTION" ''CInt
-constant "ERROR_BADUTFOFFSET" ''CInt
-constant "ERROR_CALLOUT" ''CInt
-constant "ERROR_DEPTHLIMIT" ''CInt
-constant "ERROR_HEAPLIMIT" ''CInt
-constant "ERROR_INTERNAL" ''CInt
-constant "ERROR_JIT_STACKLIMIT" ''CInt
-constant "ERROR_MATCHLIMIT" ''CInt
-constant "ERROR_NOMEMORY" ''CInt
-constant "ERROR_NULL" ''CInt
+constant ''CInt "ERROR_NOMATCH"
+constant ''CInt "ERROR_PARTIAL"
+constant ''CInt "ERROR_BADMAGIC"
+constant ''CInt "ERROR_BADMODE"
+constant ''CInt "ERROR_BADOFFSET"
+constant ''CInt "ERROR_BADOPTION"
+constant ''CInt "ERROR_BADUTFOFFSET"
+constant ''CInt "ERROR_CALLOUT"
+constant ''CInt "ERROR_DEPTHLIMIT"
+constant ''CInt "ERROR_HEAPLIMIT"
+constant ''CInt "ERROR_INTERNAL"
+constant ''CInt "ERROR_JIT_STACKLIMIT"
+constant ''CInt "ERROR_MATCHLIMIT"
+constant ''CInt "ERROR_NOMEMORY"
+constant ''CInt "ERROR_NULL"
 -- *** UTF-16-specific errors
 --
 -- | \"Missing low surrogate at end of string\"
-constant "ERROR_UTF16_ERR1" ''CInt
+constant ''CInt "ERROR_UTF16_ERR1"
 -- | \"Invalid low surrogate follows high surrogate\"
-constant "ERROR_UTF16_ERR2" ''CInt
+constant ''CInt "ERROR_UTF16_ERR2"
 -- | \"Isolated low surrogate\"
-constant "ERROR_UTF16_ERR3" ''CInt
+constant ''CInt "ERROR_UTF16_ERR3"
 
 -- * DFA matching
 
@@ -503,17 +497,17 @@ foreign import capi safe "pcre2.h" pcre2_dfa_match
     -> IO CInt
 
 -- ** DFA matching options
-constant "DFA_SHORTEST" ''CUInt
-constant "DFA_RESTART" ''CUInt
+constant ''CUInt "DFA_SHORTEST"
+constant ''CUInt "DFA_RESTART"
 
 -- ** DFA matching errors
-constant "ERROR_DFA_UFUNC" ''CInt
-constant "ERROR_DFA_UITEM" ''CInt
-constant "ERROR_DFA_UCOND" ''CInt
-constant "ERROR_DFA_UINVALID_UTF" ''CInt
-constant "ERROR_DFA_WSSIZE" ''CInt
-constant "ERROR_DFA_RECURSE" ''CInt
-constant "ERROR_DFA_BADRESTART" ''CInt
+constant ''CInt "ERROR_DFA_UFUNC"
+constant ''CInt "ERROR_DFA_UITEM"
+constant ''CInt "ERROR_DFA_UCOND"
+constant ''CInt "ERROR_DFA_UINVALID_UTF"
+constant ''CInt "ERROR_DFA_WSSIZE"
+constant ''CInt "ERROR_DFA_RECURSE"
+constant ''CInt "ERROR_DFA_BADRESTART"
 
 -- * Returned string and captured substrings
 
@@ -580,14 +574,13 @@ foreign import capi safe "pcre2.h" pcre2_substring_get_byname
     -> Ptr PCRE2_SIZE        -- ^ bufflen
     -> IO CInt
 
--- NOTE Maybe after all other substring functions?
 foreign import capi safe "pcre2.h" pcre2_substring_free
     :: Ptr PCRE2_UCHAR
     -> IO ()
 
-constant "ERROR_NOSUBSTRING" ''CInt
-constant "ERROR_NOUNIQUESUBSTRING" ''CInt
-constant "ERROR_UNAVAILABLE" ''CInt
+constant ''CInt "ERROR_NOSUBSTRING"
+constant ''CInt "ERROR_NOUNIQUESUBSTRING"
+constant ''CInt "ERROR_UNAVAILABLE"
 
 -- * Creating a new string with substitutions
 
@@ -606,20 +599,20 @@ foreign import capi safe "pcre2.h" pcre2_substitute
     -> IO CInt
 
 -- ** Substitution options
-constant "SUBSTITUTE_REPLACEMENT_ONLY" ''CUInt
-constant "SUBSTITUTE_GLOBAL" ''CUInt
-constant "SUBSTITUTE_MATCHED" ''CUInt
-constant "SUBSTITUTE_OVERFLOW_LENGTH" ''CUInt
-constant "SUBSTITUTE_LITERAL" ''CUInt
-constant "SUBSTITUTE_UNKNOWN_UNSET" ''CUInt
-constant "SUBSTITUTE_UNSET_EMPTY" ''CUInt
-constant "SUBSTITUTE_EXTENDED" ''CUInt
+constant ''CUInt "SUBSTITUTE_REPLACEMENT_ONLY"
+constant ''CUInt "SUBSTITUTE_GLOBAL"
+constant ''CUInt "SUBSTITUTE_MATCHED"
+constant ''CUInt "SUBSTITUTE_OVERFLOW_LENGTH"
+constant ''CUInt "SUBSTITUTE_LITERAL"
+constant ''CUInt "SUBSTITUTE_UNKNOWN_UNSET"
+constant ''CUInt "SUBSTITUTE_UNSET_EMPTY"
+constant ''CUInt "SUBSTITUTE_EXTENDED"
 
 -- ** Substitution errors
-constant "ERROR_BADREPLACEMENT" ''CInt
-constant "ERROR_BADREPESCAPE" ''CInt
-constant "ERROR_BADSUBSTITUTION" ''CInt
-constant "ERROR_BADSUBSPATTERN" ''CInt
+constant ''CInt "ERROR_BADREPLACEMENT"
+constant ''CInt "ERROR_BADREPESCAPE"
+constant ''CInt "ERROR_BADSUBSTITUTION"
+constant ''CInt "ERROR_BADSUBSPATTERN"
 
 -- * Other information about a match
 
