@@ -85,7 +85,7 @@ foreign import capi unsafe "pcre2.h" pcre2_set_bsr
 constant ''CUInt "BSR_ANYCRLF"
 constant ''CUInt "BSR_UNICODE"
 
-foreign import capi "pcre2.h" pcre2_set_character_tables
+foreign import capi unsafe "pcre2.h" pcre2_set_character_tables
     :: Ptr Pcre2_compile_context
     -> Ptr CUChar
     -> IO CInt
@@ -219,7 +219,7 @@ foreign import capi safe "pcre2.h" pcre2_code_copy
     :: Ptr Pcre2_code
     -> IO (Ptr Pcre2_code)
 
-foreign import capi "pcre2.h" pcre2_code_copy_with_tables
+foreign import capi safe "pcre2.h" pcre2_code_copy_with_tables
     :: Ptr Pcre2_code
     -> IO (Ptr Pcre2_code)
 
@@ -525,7 +525,7 @@ foreign import capi unsafe "pcre2.h" pcre2_substring_length_bynumber
     -> Ptr PCRE2_SIZE       -- ^ length
     -> IO CInt
 
-foreign import capi safe "pcre2.h" pcre2_substring_copy_bynumber
+foreign import capi unsafe "pcre2.h" pcre2_substring_copy_bynumber
     :: Ptr Pcre2_match_data
     -> CUInt                -- ^ number
     -> Ptr PCRE2_UCHAR      -- ^ buffer
@@ -539,7 +539,7 @@ foreign import capi safe "pcre2.h" pcre2_substring_get_bynumber
     -> Ptr PCRE2_SIZE        -- ^ bufflen
     -> IO CInt
 
-foreign import capi unsafe "pcre2.h" pcre2_substring_list_get
+foreign import capi safe "pcre2.h" pcre2_substring_list_get
     :: Ptr Pcre2_match_data
     -> Ptr (Ptr (Ptr PCRE2_UCHAR)) -- ^ listptr
     -> Ptr (Ptr PCRE2_SIZE)        -- ^ lengthsptr
@@ -625,7 +625,7 @@ foreign import capi unsafe "pcre2.h" pcre2_get_startchar
     -> IO PCRE2_SIZE
 
 -- * Obtaining a textual error message
-foreign import capi safe "pcre2.h" pcre2_get_error_message
+foreign import capi unsafe "pcre2.h" pcre2_get_error_message
     :: CInt
     -> Ptr PCRE2_UCHAR
     -> PCRE2_SIZE
