@@ -1,5 +1,8 @@
 # Changelog and Acknowledgements
 
+## 1.1.4
+* Fixed some incorrect foreign imports' safety.
+
 ## 1.1.3.1
 * Fixed a very minor issue where `pcreVersion` still reported "10.35" even
   though it in fact was using 10.36.

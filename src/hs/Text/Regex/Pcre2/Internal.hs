@@ -50,8 +50,7 @@ import           Text.Regex.Pcre2.Foreign
 -- | There is no @nullForeignPtr@ to pass to `withForeignPtr`, so we have to
 -- fake it with a `Maybe`.
 withForeignOrNullPtr :: Maybe (ForeignPtr a) -> (Ptr a -> IO b) -> IO b
-withForeignOrNullPtr Nothing   = \action -> action nullPtr
-withForeignOrNullPtr (Just fp) = withForeignPtr fp
+withForeignOrNullPtr = maybe ($ nullPtr) withForeignPtr
 
 -- | Helper so we never leak untracked 'Ptr's.
 mkForeignPtr :: (Ptr a -> IO ()) -> IO (Ptr a) -> IO (ForeignPtr a)
@@ -68,8 +67,8 @@ safeLast :: [a] -> Maybe a
 safeLast [] = Nothing
 safeLast xs = Just $ last xs
 
-bitOr :: (Foldable t, Num a, Bits a) => t a -> a
-bitOr = foldl' (.|.) 0
+bitOr :: (Foldable t, Bits a) => t a -> a
+bitOr = foldl' (.|.) zeroBits
 
 -- | Placeholder for half-building a `Traversal'` to be passed to `has`.
 noTouchy :: a
@@ -183,11 +182,8 @@ instance MonadTrans (Stream b) where
 instance (MonadIO m) => MonadIO (Stream b m) where
     liftIO = lift . liftIO
 
-yield :: b -> Stream b m ()
-yield y = StreamYield y $ StreamPure ()
-
-stop :: Stream b m a
-stop = StreamStop
+streamYield :: b -> Stream b m ()
+streamYield y = StreamYield y $ StreamPure ()
 
 -- | Effectfully transform yielded values.
 mapMS :: (Functor m) => (b -> m c) -> Stream b m a -> Stream c m a
@@ -199,9 +195,9 @@ mapMS f = fix $ \go -> \case
 
 -- | Unsafely, lazily tear down a `Stream` into a pure list of values yielded.
 -- The stream must be infinite in the sense of it only terminating due to
--- explicit `stop`.
-unsafeLazyRunStream :: Stream b IO Void -> [b]
-unsafeLazyRunStream = fix $ \continue -> \case
+-- explicit `StreamStop`.
+unsafeLazyStreamToList :: Stream b IO Void -> [b]
+unsafeLazyStreamToList = fix $ \continue -> \case
     StreamPure v    -> absurd v
     StreamYield y s -> y : continue s
     StreamEffect ms -> continue $ unsafePerformIO ms
@@ -765,12 +761,12 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
                             ctxPtr
 
                 -- Handle no match and errors
-                when (result == pcre2_ERROR_NOMATCH) stop
+                when (result == pcre2_ERROR_NOMATCH) StreamStop
                 when (result == pcre2_ERROR_CALLOUT) $
                     liftIO $ maybeRethrow matchTempEnvRef
                 liftIO $ check (> 0) result
 
-                yield matchDataPtr
+                streamYield matchDataPtr
 
                 -- Determine next starting offset
                 nextOff <- liftIO $ do
@@ -780,7 +776,7 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
                     return $ max curOffEnd (curOff + 1)
 
                 -- Handle end of subject
-                when (nextOff > fromIntegral subjCUs) stop
+                when (nextOff > fromIntegral subjCUs) StreamStop
 
                 continue nextOff
 
@@ -799,7 +795,7 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
 -- One potential issue arising from two attempts is running effectful callouts
 -- twice.  We mitigate this by skipping callouts the second time:
 --
--- * all capture callouts, since they had run during the simulation, and
+-- * all regular callouts, since they had run during the simulation, and
 --
 -- * those substitution callouts that had run the first time.
 --
@@ -862,7 +858,7 @@ assembleSubber replacement =
                 -- The output was bigger than we guessed.  Try again.
                 computedOutLen <- fromIntegral <$> peek outLenPtr
                 let finalMatchEnv = firstMatchEnv {
-                        -- Do not run capture callouts again.
+                        -- Do not run regular callouts again.
                         matchEnvCallout = Nothing,
                         -- Do not run any substitution callouts run previously.
                         matchEnvSubCallout = fastFwd <$> matchEnvSubCallout}
@@ -1094,7 +1090,7 @@ _capturesInternal matcher getSliceRanges slicer f subject =
         in Text.concat $ foldr mkSegments termSegments triples 0
 
     where
-    sliceRangeLists = unsafeLazyRunStream $
+    sliceRangeLists = unsafeLazyStreamToList $
         mapMS getSliceRanges $ matcher subject
     captureLists = map (NE.map $ slicer subject) sliceRangeLists
 
@@ -1174,8 +1170,8 @@ capturesA = capturesAOpt mempty
 capturesAOpt :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
 capturesAOpt option patt = toAlternativeOf $ _capturesOpt option patt
 
--- | Match a pattern to a subject and lazily a list of all non-overlapping
--- portions, with all capture groups, that matched.
+-- | Match a pattern to a subject and lazily produce a list of all
+-- non-overlapping portions, with all capture groups, that matched.
 --
 -- @since 1.1.0
 capturesAll :: Text -> Text -> [NonEmpty Text]
