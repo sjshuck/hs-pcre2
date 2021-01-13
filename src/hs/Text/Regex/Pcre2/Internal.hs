@@ -1138,11 +1138,6 @@ getAllSliceRanges matchDataPtr = do
 
     getWhitelistedSliceRanges whitelist matchDataPtr
 
--- | Helper to create non-Template Haskell API functions.  They all take options
--- and a pattern, and then do something via a 'Matcher'.
-newMatcher :: Option -> Text -> Matcher
-newMatcher option patt = unsafePerformIO $ assembleMatcher option patt
-
 -- | Match a pattern to a subject once and return a list of captures, or @[]@ if
 -- no match.
 captures :: Text -> Text -> [Text]
@@ -1189,12 +1184,10 @@ matches = matchesOpt mempty
 
 -- | @matchesOpt mempty = matches@
 matchesOpt :: Option -> Text -> Text -> Bool
-matchesOpt opt t = has $ _capturesInternal
-    matcher
+matchesOpt option patt = has $ _capturesInternal
+    (unsafePerformIO $ assembleMatcher option patt)
     (const $ return noTouchy)
     noTouchy
-  where
-    matcher = newMatcher opt t
 
 -- | Match a pattern to a subject once and return the portion that matched in an
 -- `Alternative`, or `empty` if no match.
@@ -1288,9 +1281,9 @@ _captures = _capturesOpt mempty
 
 -- | @_capturesOpt mempty = _captures@
 _capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
-_capturesOpt opt t = _capturesInternal matcher getAllSliceRanges slice
-  where
-    matcher = newMatcher opt t
+_capturesOpt option patt = _capturesInternal matcher getAllSliceRanges slice
+    where
+    matcher = unsafePerformIO $ assembleMatcher option patt
 
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
 -- a subject to the portions of it that match.
@@ -1301,9 +1294,9 @@ _match = _matchOpt mempty
 
 -- | @_matchOpt mempty = _match@
 _matchOpt :: Option -> Text -> Traversal' Text Text
-_matchOpt opt t = _capturesInternal matcher get0thSliceRanges slice . _headNE
-  where
-    matcher = newMatcher opt t
+_matchOpt option patt = _capturesInternal matcher get0thSliceRanges slice . _headNE
+    where
+    matcher = unsafePerformIO $ assembleMatcher option patt
 
 -- * Support for Template Haskell compile-time regex analysis
 
