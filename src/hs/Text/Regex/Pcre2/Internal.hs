@@ -739,46 +739,44 @@ assembleSubjFun mkSubjFun option patt =
 
 -- | Produce a `Matcher` from user-supplied `Option` and pattern.
 assembleMatcher :: Option -> Text -> IO Matcher
-assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) ->
-    let matchTempEnvWithSubj = mkMatchTempEnv matchEnv
-    in \subject -> StreamEffect $
-        withForeignPtr matchEnvCode $ \codePtr ->
-        withMatchDataFromCode codePtr $ \matchDataPtr ->
-        Text.useAsPtr subject $ \subjPtr subjCUs -> do
-            MatchTempEnv {..} <- matchTempEnvWithSubj subject
+assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) subject ->
+    StreamEffect $
+    withForeignPtr matchEnvCode $ \codePtr ->
+    withMatchDataFromCode codePtr $ \matchDataPtr ->
+    Text.useAsPtr subject $ \subjPtr subjCUs -> do
+        MatchTempEnv {..} <- mkMatchTempEnv matchEnv subject
 
-            -- Loop over the subject, emitting slice lists until stopping.
-            return $ fix1 0 $ \continue curOff -> do
-                result <- liftIO $
-                    withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
-                        pcre2_match
-                            codePtr
-                            (castCUs subjPtr)
-                            (fromIntegral subjCUs)
-                            curOff
-                            matchEnvOpts
-                            matchDataPtr
-                            ctxPtr
+        -- Loop over the subject, emitting slice lists until stopping.
+        return $ fix1 0 $ \continue curOff -> do
+            result <- liftIO $ withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
+                pcre2_match
+                    codePtr
+                    (castCUs subjPtr)
+                    (fromIntegral subjCUs)
+                    curOff
+                    matchEnvOpts
+                    matchDataPtr
+                    ctxPtr
 
-                -- Handle no match and errors
-                when (result == pcre2_ERROR_NOMATCH) StreamStop
-                when (result == pcre2_ERROR_CALLOUT) $
-                    liftIO $ maybeRethrow matchTempEnvRef
-                liftIO $ check (> 0) result
+            -- Handle no match and errors
+            when (result == pcre2_ERROR_NOMATCH) StreamStop
+            when (result == pcre2_ERROR_CALLOUT) $
+                liftIO $ maybeRethrow matchTempEnvRef
+            liftIO $ check (> 0) result
 
-                streamYield matchDataPtr
+            streamYield matchDataPtr
 
-                -- Determine next starting offset
-                nextOff <- liftIO $ do
-                    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
-                    curOffEnd <- peekElemOff ovecPtr 1
-                    -- Prevent infinite loop upon empty match
-                    return $ max curOffEnd (curOff + 1)
+            -- Determine next starting offset
+            nextOff <- liftIO $ do
+                ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+                curOffEnd <- peekElemOff ovecPtr 1
+                -- Prevent infinite loop upon empty match
+                return $ max curOffEnd (curOff + 1)
 
-                -- Handle end of subject
-                when (nextOff > fromIntegral subjCUs) StreamStop
+            -- Handle end of subject
+            when (nextOff > fromIntegral subjCUs) StreamStop
 
-                continue nextOff
+            continue nextOff
 
     where
     withMatchDataFromCode codePtr action = do
@@ -1294,8 +1292,8 @@ _match = _matchOpt mempty
 
 -- | @_matchOpt mempty = _match@
 _matchOpt :: Option -> Text -> Traversal' Text Text
-_matchOpt option patt = _capturesInternal matcher get0thSliceRanges slice . _headNE
-    where
+_matchOpt option patt = _cs . _headNE where
+    _cs = _capturesInternal matcher get0thSliceRanges slice
     matcher = unsafePerformIO $ assembleMatcher option patt
 
 -- * Support for Template Haskell compile-time regex analysis

@@ -224,7 +224,7 @@ bugFixes = do
 
     where
     issue :: Int -> Expectation -> Spec
-    issue n = it $ "https://github.com/sjshuck/pcre2/issues/" ++ show n
+    issue n = it $ "https://github.com/sjshuck/hs-pcre2/issues/" ++ show n
 
 onlyCausesOneCompilation :: (Option -> Text -> a) -> Expectation
 onlyCausesOneCompilation regexWithOpt = do
