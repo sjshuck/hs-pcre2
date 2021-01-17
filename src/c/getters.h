@@ -8,7 +8,7 @@
 #ifdef GETTER
 #error GETTER already defined
 #endif
-#define GETTER(src, field, ret) \
+#define GETTER(src, ret, field) \
     ret pcre2_##src##_##field(pcre2_##src *block) \
     { \
         return block->field; \
@@ -22,38 +22,38 @@
         return block->version;
     }
 */
-GETTER(callout_block, version,               uint32_t)
-GETTER(callout_block, callout_number,        uint32_t)
-GETTER(callout_block, capture_top,           uint32_t)
-GETTER(callout_block, capture_last,          uint32_t)
-GETTER(callout_block, callout_flags,         uint32_t)
-GETTER(callout_block, offset_vector,         PCRE2_SIZE *)
-GETTER(callout_block, mark,                  PCRE2_SPTR)
-GETTER(callout_block, subject,               PCRE2_SPTR)
-GETTER(callout_block, subject_length,        PCRE2_SIZE)
-GETTER(callout_block, start_match,           PCRE2_SIZE)
-GETTER(callout_block, current_position,      PCRE2_SIZE)
-GETTER(callout_block, pattern_position,      PCRE2_SIZE)
-GETTER(callout_block, next_item_length,      PCRE2_SIZE)
-GETTER(callout_block, callout_string_offset, PCRE2_SIZE)
-GETTER(callout_block, callout_string_length, PCRE2_SIZE)
-GETTER(callout_block, callout_string,        PCRE2_SPTR)
+GETTER(callout_block, uint32_t,     version)
+GETTER(callout_block, uint32_t,     callout_number)
+GETTER(callout_block, uint32_t,     capture_top)
+GETTER(callout_block, uint32_t,     capture_last)
+GETTER(callout_block, uint32_t,     callout_flags)
+GETTER(callout_block, PCRE2_SIZE *, offset_vector)
+GETTER(callout_block, PCRE2_SPTR,   mark)
+GETTER(callout_block, PCRE2_SPTR,   subject)
+GETTER(callout_block, PCRE2_SIZE,   subject_length)
+GETTER(callout_block, PCRE2_SIZE,   start_match)
+GETTER(callout_block, PCRE2_SIZE,   current_position)
+GETTER(callout_block, PCRE2_SIZE,   pattern_position)
+GETTER(callout_block, PCRE2_SIZE,   next_item_length)
+GETTER(callout_block, PCRE2_SIZE,   callout_string_offset)
+GETTER(callout_block, PCRE2_SIZE,   callout_string_length)
+GETTER(callout_block, PCRE2_SPTR,   callout_string)
 
-GETTER(callout_enumerate_block, version,               uint32_t)
-GETTER(callout_enumerate_block, pattern_position,      PCRE2_SIZE)
-GETTER(callout_enumerate_block, next_item_length,      PCRE2_SIZE)
-GETTER(callout_enumerate_block, callout_number,        uint32_t)
-GETTER(callout_enumerate_block, callout_string_offset, PCRE2_SIZE)
-GETTER(callout_enumerate_block, callout_string_length, PCRE2_SIZE)
-GETTER(callout_enumerate_block, callout_string,        PCRE2_SPTR)
+GETTER(callout_enumerate_block, uint32_t,   version)
+GETTER(callout_enumerate_block, PCRE2_SIZE, pattern_position)
+GETTER(callout_enumerate_block, PCRE2_SIZE, next_item_length)
+GETTER(callout_enumerate_block, uint32_t,   callout_number)
+GETTER(callout_enumerate_block, PCRE2_SIZE, callout_string_offset)
+GETTER(callout_enumerate_block, PCRE2_SIZE, callout_string_length)
+GETTER(callout_enumerate_block, PCRE2_SPTR, callout_string)
 
-GETTER(substitute_callout_block, version,        uint32_t)
-GETTER(substitute_callout_block, subscount,      uint32_t)
-GETTER(substitute_callout_block, input,          PCRE2_SPTR)
-GETTER(substitute_callout_block, output,         PCRE2_SPTR)
-GETTER(substitute_callout_block, ovector,        PCRE2_SIZE *)
-GETTER(substitute_callout_block, oveccount,      uint32_t)
-GETTER(substitute_callout_block, output_offsets, PCRE2_SIZE *) // array of 2
+GETTER(substitute_callout_block, uint32_t,     version)
+GETTER(substitute_callout_block, uint32_t,     subscount)
+GETTER(substitute_callout_block, PCRE2_SPTR,   input)
+GETTER(substitute_callout_block, PCRE2_SPTR,   output)
+GETTER(substitute_callout_block, PCRE2_SIZE *, ovector)
+GETTER(substitute_callout_block, uint32_t,     oveccount)
+GETTER(substitute_callout_block, PCRE2_SIZE *, output_offsets) // array of 2
 
 #undef GETTER
 
