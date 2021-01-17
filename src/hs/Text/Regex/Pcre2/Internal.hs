@@ -21,7 +21,6 @@ import           Data.Either                (partitionEithers)
 import           Data.Function              ((&))
 import           Data.Functor               ((<&>))
 import           Data.Functor.Const         (Const(..))
-import           Data.Functor.Identity      (Identity(..))
 import           Data.IORef
 import           Data.IntMap.Strict         (IntMap)
 import qualified Data.IntMap.Strict         as IM
@@ -42,7 +41,7 @@ import           Foreign.C.Types
 import qualified Foreign.Concurrent         as Conc
 import           GHC.TypeLits               hiding (Text)
 import qualified GHC.TypeLits               as TypeLits
-import           System.IO.Unsafe
+import           System.IO.Unsafe           (unsafePerformIO)
 import           Text.Regex.Pcre2.Foreign
 
 -- * General utilities
@@ -127,21 +126,28 @@ instance CastCUs CUShort Word16
 instance CastCUs Word16 CUShort
 
 -- ** Lens types and utilities
---
--- $LensTypesAndUtilities
--- The combinators\' types are excessively polymorphic\/polykinded\/ugly because
--- they have no accompanying signatures (not worth the trouble).
 
 type Lens'      s a = forall f. (Functor f)     => (a -> f a) -> s -> f s
 type Traversal' s a = forall f. (Applicative f) => (a -> f a) -> s -> f s
 
+type Getting r s a = (a -> Const r a) -> s -> Const r s
+
+preview :: Getting (First a) s a -> s -> Maybe a
 preview l = getFirst . getConst . l (Const . First . Just)
+
+view :: Getting a s a -> s -> a
 view l = getConst . l Const
+
+to :: (s -> a) -> forall r. Getting r s a
 to k f = Const . getConst . f . k
+
+has :: Getting Any s a -> s -> Bool
 has l = getAny . getConst . l (\_ -> Const $ Any True)
+
+toListOf :: Getting (Endo [a]) s a -> s -> [a]
 toListOf l = flip appEndo [] . view (l . to (Endo . (:)))
 
--- toAlternativeOf :: (Alternative f) => Getting (Alt f a) s a -> s -> f a
+toAlternativeOf :: (Alternative f) => Getting (Alt f a) s a -> s -> f a
 toAlternativeOf l = getAlt . view (l . to (Alt . pure))
 
 _headNE :: Lens' (NonEmpty a) a
@@ -607,7 +613,7 @@ _MatchContextOption f =
 type ExtractOpts = StateT [AppliedOption] IO
 
 -- | Use a fake @Prism'@ to extract a category of options.
-extractOptsOf :: Traversal' AppliedOption a -> ExtractOpts [a]
+extractOptsOf :: Getting (First a) AppliedOption a -> ExtractOpts [a]
 extractOptsOf traversal = state $ partitionEithers . map discrim where
     discrim opt = maybe (Right opt) Left $ preview traversal opt
 
