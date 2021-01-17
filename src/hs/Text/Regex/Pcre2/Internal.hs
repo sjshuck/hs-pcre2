@@ -170,7 +170,6 @@ instance (Functor m) => Applicative (Stream b m) where
     StreamStop       <*> _  = StreamStop
 
 instance (Functor m) => Monad (Stream b m) where
-    return = pure
     StreamPure x     >>= f = f x
     StreamYield y sx >>= f = StreamYield y $ sx >>= f
     StreamEffect msx >>= f = StreamEffect $ msx <&> (>>= f)
@@ -805,8 +804,7 @@ assembleSubber
     -> Option
     -> Text      -- ^ pattern
     -> IO Subber
-assembleSubber replacement =
-    assembleSubjFun $ \firstMatchEnv@(MatchEnv {..}) ->
+assembleSubber replacement = assembleSubjFun $ \firstMatchEnv@(MatchEnv {..}) ->
     -- Subber
     \subject ->
     withForeignPtr matchEnvCode $ \codePtr ->
@@ -880,9 +878,9 @@ mkMatchTempEnv
     :: MatchEnv
     -> Text -- ^ Callout info requires access to the original subject.
     -> IO MatchTempEnv
-mkMatchTempEnv (MatchEnv {..})
-    | null matchEnvCallout && null matchEnvSubCallout = \_ -> return noCallouts
-    | otherwise                                       = \subject -> do
+mkMatchTempEnv (MatchEnv {..}) subject
+    | null matchEnvCallout && null matchEnvSubCallout = return noCallouts
+    | otherwise                                       = do
         calloutStateRef <- newIORef $ CalloutState {
             calloutStateException = Nothing,
             calloutStateSubsLog   = IM.empty}
@@ -1002,14 +1000,12 @@ getCalloutInfo subject blockPtr = do
         ovecPtr <- pcre2_callout_block_offset_vector blockPtr
         top <- pcre2_callout_block_capture_top blockPtr
         forM (0 :| [1 .. fromIntegral top - 1]) $ \n -> do
-            start <- peekElemOff ovecPtr $ n * 2
-            if start == pcre2_UNSET
-                then return Nothing
-                else Just <$> do
-                    end <- peekElemOff ovecPtr $ n * 2 + 1
-                    return $ slice calloutSubject $ SliceRange
-                        (fromIntegral start)
-                        (fromIntegral end)
+            [start, end] <- forM [0, 1] $ peekElemOff ovecPtr . (n * 2 +)
+            return $ if start == pcre2_UNSET
+                then Nothing
+                else Just $ slice calloutSubject $ SliceRange
+                    (fromIntegral start)
+                    (fromIntegral end)
 
     calloutMark <- do
         ptr <- pcre2_callout_block_mark blockPtr
@@ -1043,14 +1039,12 @@ getSubCalloutInfo subCalloutSubject blockPtr = do
         ovecPtr <- pcre2_substitute_callout_block_ovector blockPtr
         ovecCount <- pcre2_substitute_callout_block_oveccount blockPtr
         forM (0 :| [1 .. fromIntegral ovecCount - 1]) $ \n -> do
-            start <- peekElemOff ovecPtr $ n * 2
-            if start == pcre2_UNSET
-                then return Nothing
-                else Just <$> do
-                    end <- peekElemOff ovecPtr $ n * 2 + 1
-                    return $ slice subCalloutSubject $ SliceRange
-                        (fromIntegral start)
-                        (fromIntegral end)
+            [start, end] <- forM [0, 1] $ peekElemOff ovecPtr . (n * 2 +)
+            return $ if start == pcre2_UNSET
+                then Nothing
+                else Just $ slice subCalloutSubject $ SliceRange
+                    (fromIntegral start)
+                    (fromIntegral end)
 
     subCalloutReplacement <- do
         outPtr <- pcre2_substitute_callout_block_output blockPtr
