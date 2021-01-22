@@ -1,5 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE LambdaCase #-}
@@ -161,12 +162,7 @@ data Stream b m a
     | StreamYield b (Stream b m a)    -- ^ yield a value and keep going
     | StreamEffect (m (Stream b m a)) -- ^ have an effect and keep going
     | StreamStop                      -- ^ short-circuit
-
-instance (Functor m) => Functor (Stream b m) where
-    f `fmap` StreamPure x     = StreamPure $ f x
-    f `fmap` StreamYield y sx = StreamYield y $ f <$> sx
-    f `fmap` StreamEffect msx = StreamEffect $ fmap f <$> msx
-    _ `fmap` StreamStop       = StreamStop
+    deriving (Functor)
 
 instance (Functor m) => Applicative (Stream b m) where
     pure = StreamPure
