@@ -329,10 +329,10 @@ data Option
     | SubReplacementOnly -- ^ /Affects `subOpt`./  Return just the rendered
     -- replacement instead of it within the subject.  With `SubGlobal`, all
     -- results are concatenated.
-    | SubUnknownUnset -- ^ /Affects `subOpt`./  References in the replacement
-    -- to non-existent captures don\'t error but are treated as unset.
-    | SubUnsetEmpty -- ^ /Affects `subOpt`./  References in the replacement
-    -- to unset captures don\'t error but are treated as empty.
+    | SubUnknownUnset -- ^ /Affects `subOpt`./  References in the replacement to
+    -- non-existent captures don\'t error but are treated as unset.
+    | SubUnsetEmpty -- ^ /Affects `subOpt`./  References in the replacement to
+    -- unset captures don\'t error but are treated as empty.
     | Ucp -- ^ Count Unicode characters in some character classes such as @\\d@.
     -- Incompatible with `NeverUcp`.
     | Ungreedy -- ^ Invert the effect of @?@.  Without it, quantifiers are
@@ -747,7 +747,7 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) subject ->
     Text.useAsPtr subject $ \subjPtr subjCUs -> do
         MatchTempEnv {..} <- mkMatchTempEnv matchEnv subject
 
-        -- Loop over the subject, emitting slice lists until stopping.
+        -- Loop over the subject, emitting match data until stopping.
         return $ fix1 0 $ \continue curOff -> do
             result <- liftIO $ withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
                 pcre2_match
