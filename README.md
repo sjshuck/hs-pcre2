@@ -12,11 +12,19 @@ embeddedLicensePlate = match "[A-Z]{3}[0-9]{3,4}"
 ```
 ```haskell
 case "The quick brown fox" of
-    [regex|brown\s+(?<animal>\S+)|] -> Text.putStrLn animal
+    [regex|brown\s+(?<animal>\w+)|] -> Text.putStrLn animal
     _                               -> error "nothing brown"
 ```
 ```haskell
-let kv'd = lined . packed . [_regex|^\s*(.*?)\s*[=:]\s*(.*)|]
+let kv'd = lined . packed . [_regex|(?x)  # Extended PCRE2 syntax
+        ^\s*          # Ignore leading whitespace
+        ([^=:\s].*?)  # Capture the non-empty key
+        \s*           # Ignore trailing whitespace
+        [=:]          # Separator
+        \s*           # Ignore leading whitespace
+        (.*?)         # Capture the possibly-empty value
+        \s*$          # Ignore trailing whitespace
+    |]
 
 forMOf kv'd file $ execStateT $ do
     k <- gets $ capture @1
@@ -31,7 +39,6 @@ forMOf kv'd file $ execStateT $ do
 ```
 
 ## Features
-* Low-surface API covering most use cases.
 * Quiet functions with simple types&mdash;for the most part it's  
 `Text` _(pattern)_ `-> Text` _(subject)_ `-> result`.
 * Use partial application to create performant, compile-once-match-many code.
