@@ -1294,7 +1294,7 @@ _matchOpt option patt = _cs . _headNE where
 
 -- * Support for Template Haskell compile-time regex analysis
 
--- | From options and pattern, determine parenthesized patterns\' names in
+-- | From options and pattern, determine parenthesized captures\' names in
 -- order.
 predictCaptureNames :: Option -> Text -> IO [Maybe Text]
 predictCaptureNames option patt = do
@@ -1304,7 +1304,7 @@ predictCaptureNames option patt = do
 
     withForeignPtr code getCaptureNames
 
--- | NOTE: The 0th capture is always named @Nothing@.
+-- | Get parenthesized captures\' names in order.
 getCaptureNames :: Ptr Pcre2_code -> IO [Maybe Text]
 getCaptureNames codePtr = do
     nameCount <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMECOUNT
@@ -1325,7 +1325,7 @@ getCaptureNames codePtr = do
 
     hiCaptNum <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
 
-    return $ map (names IM.!?) [0 .. fromIntegral hiCaptNum]
+    return $ map (names IM.!?) [1 .. fromIntegral hiCaptNum]
 
 -- | Low-level access to compiled pattern info, per the docs.
 getCodeInfo :: (Storable a) => Ptr Pcre2_code -> CUInt -> IO a

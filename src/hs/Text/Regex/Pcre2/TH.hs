@@ -19,9 +19,13 @@ import           Language.Haskell.TH.Syntax
 import           System.IO.Unsafe           (unsafePerformIO)
 import           Text.Regex.Pcre2.Internal
 
+-- | Unexported, top-level `IORef` that\'s created upon the first runtime
+-- evaluation of a Template Haskell `Matcher`.
 globalMatcherCache :: IORef (Map Text Matcher)
 globalMatcherCache = unsafePerformIO $ newIORef Map.empty
+{-# NOINLINE globalMatcherCache #-}
 
+-- | Given a `Text`, create or retrieve a `Matcher` from the global cache.
 memoMatcher :: Text -> Matcher
 memoMatcher patt = unsafePerformIO $ do
     cache <- readIORef globalMatcherCache
@@ -33,27 +37,32 @@ memoMatcher patt = unsafePerformIO $ do
                 (Map.insert patt matcher cache, ())
             return matcher
 
+-- | Generate code to produce \(and memoize\) a `Matcher` from a pattern.
 matcherQ :: String -> ExpQ
 matcherQ s = [e| memoMatcher $ Text.pack $(stringE s) |]
 
+-- | Predict parenthesized captures \(maybe named\) of a pattern at splice time.
 predictCaptureNamesQ :: String -> Q [Maybe Text]
 predictCaptureNamesQ = runIO . predictCaptureNames mempty . Text.pack
 
+-- | Get the indexes of `Just` the named captures.
 toKVs :: [Maybe Text] -> [(Int, Text)]
-toKVs names = [(number, name) | (number, Just name) <- zip [0 ..] names]
+toKVs names = [(number, name) | (number, Just name) <- zip [1 ..] names]
 
+-- | Generate the data-kinded phantom type parameter of `Captures` of a pattern,
+-- if needed.
 capturesInfoQ :: String -> Q (Maybe Type)
 capturesInfoQ s = predictCaptureNamesQ s >>= \case
-    -- No named captures, so need for Captures, so no info.
-    [Nothing] -> return Nothing
+    -- No parenthesized captures, so need for Captures, so no info.
+    [] -> return Nothing
 
-    -- Named captures.  Present
-    --     [Nothing, Just "foo", Just "bar", Nothing]
+    -- One or more parenthesized captures.  Present
+    --     [Just "foo", Just "bar", Nothing]
     -- as
     --     '(3, '[ '("foo", 1), '("bar", 2)]).
     captureNames -> Just <$> promotedTupleT 2 `appT` hi `appT` kvs where
         -- 3
-        hi = litT $ numTyLit $ fromIntegral $ length captureNames - 1
+        hi = litT $ numTyLit $ fromIntegral $ length captureNames
         -- '[ '("foo", 1), '("bar", 2)]
         kvs = foldr f promotedNilT $ toKVs captureNames where
             -- '("foo", 1) ': ...
