@@ -110,14 +110,14 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 -- If there are no named captures, this simply acts as a guard.
 regex :: QuasiQuoter
 regex = QuasiQuoter {
-    quoteExp = \s -> capturesInfoQ s >>= \case
-        Nothing -> [e|
-            let _cs = _capturesInternal $(matcherQ s) get0thSliceRanges slice
-            in toAlternativeOf $ _cs . _headNE |]
-        Just info -> [e|
-            let _cs = _capturesInternal $(matcherQ s) getAllSliceRanges slice
-                wrap cs = Captures cs :: Captures $(return info)
-            in toAlternativeOf $ _cs . to wrap |],
+    quoteExp = \s -> do
+        let fromCsQ = capturesInfoQ s >>= maybe [e| _headNE |] toWrapQ
+            toWrapQ info = [e|
+                let wrap cs = Captures cs :: Captures $(return info)
+                in to wrap |]
+
+        [e| toAlternativeOf $
+            _capturesInternal $(matcherQ s) getAllSliceRanges . $(fromCsQ) |],
 
     quotePat = \s -> do
         captureNames <- predictCaptureNamesQ s
@@ -126,11 +126,7 @@ regex = QuasiQuoter {
             -- No named captures.  Test whether the string matches without
             -- creating any new Text values.
             Nothing -> viewP
-                [e|
-                    has $ _capturesInternal
-                        $(matcherQ s)
-                        (const $ return noTouchy)
-                        noTouchy |]
+                [e| has $ _capturesInternal $(matcherQ s) errorFromMatch |]
                 [p| True |]
 
             -- One or more named captures.  Attempt to bind only those to local
@@ -141,7 +137,6 @@ regex = QuasiQuoter {
                     let _cs = _capturesInternal
                             $(matcherQ s)
                             (getWhitelistedSliceRanges $(liftData numbers))
-                            slice
                     in view $ _cs . to NE.toList |]
                 p = foldr f wildP names where
                     f name r = conP '(:) [varP $ mkName $ Text.unpack name, r],
@@ -149,6 +144,8 @@ regex = QuasiQuoter {
     quoteType = const $ fail "regex: cannot produce a type",
 
     quoteDec = const $ fail "regex: cannot produce declarations"}
+
+
 
 -- | A global, optical variant of `regex`.  Can only be used as an expression.
 --
@@ -168,15 +165,14 @@ regex = QuasiQuoter {
 --
 _regex :: QuasiQuoter
 _regex = QuasiQuoter {
-    quoteExp = \s -> capturesInfoQ s >>= \case
-        Nothing -> [e|
-            let _cs = _capturesInternal $(matcherQ s) get0thSliceRanges slice
-            in _cs . _headNE |]
-        Just info -> [e|
-            let _cs = _capturesInternal $(matcherQ s) getAllSliceRanges slice
-                wrapped :: Lens' (NonEmpty Text) (Captures $(return info))
-                wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
-            in _cs . wrapped |],
+    quoteExp = \s -> do
+        let fromCsQ = capturesInfoQ s >>= maybe [e| _headNE |] wrappedQ
+            wrappedQ info = [e|
+                let wrapped :: Lens' (NonEmpty Text) (Captures $(return info))
+                    wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
+                in wrapped |]
+
+        [e| _capturesInternal $(matcherQ s) getAllSliceRanges . $(fromCsQ) |],
 
     quotePat = const $ fail "_regex: cannot produce a pattern",
 

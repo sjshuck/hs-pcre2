@@ -70,10 +70,6 @@ safeLast xs = Just $ last xs
 bitOr :: (Foldable t, Bits a) => t a -> a
 bitOr = foldl' (.|.) zeroBits
 
--- | Placeholder for half-building a `Traversal'` to be passed to `has`.
-noTouchy :: a
-noTouchy = error "BUG! Tried to use match results"
-
 -- | Equivalent to @flip fix@.
 --
 -- Used to express a recursive function of one argument that is called only once
@@ -107,8 +103,8 @@ thinSlice :: Text -> SliceRange -> Text
 thinSlice text (SliceRange off offEnd)
     | off == fromIntegral pcre2_UNSET = Text.empty
     | otherwise                       = text
+        & Text.takeWord16 offEnd
         & Text.dropWord16 off
-        & Text.takeWord16 (offEnd - off)
 
 -- | Slice a 'Text', copying if it\'s less than half of the original.
 slice :: Text -> SliceRange -> Text
@@ -146,13 +142,13 @@ has :: Getting Any s a -> s -> Bool
 has l = getAny . getConst . l (\_ -> Const $ Any True)
 
 toListOf :: Getting (Endo [a]) s a -> s -> [a]
-toListOf l = flip appEndo [] . view (l . to (Endo . (:)))
+toListOf l x = let build = Endo . (:) in view (l . to build) x `appEndo` []
 
 toAlternativeOf :: (Alternative f) => Getting (Alt f a) s a -> s -> f a
-toAlternativeOf l = getAlt . view (l . to (Alt . pure))
+toAlternativeOf l = let alt = Alt . pure in getAlt . view (l . to alt)
 
 _headNE :: Lens' (NonEmpty a) a
-_headNE f (x :| xs) = f x <&> \x' -> x' :| xs
+_headNE f (x :| xs) = f x <&> (:| xs)
 
 -- ** Streaming support
 
@@ -1068,12 +1064,8 @@ maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
 -- @Setter'@ to perform substitutions at the Haskell level.  Operates globally.
 --
 -- Internal only!  Users should not (have to) know about `Matcher`.
-_capturesInternal
-    :: Matcher
-    -> FromMatch                    -- ^ get some or all captures offsets
-    -> (Text -> SliceRange -> Text) -- ^ slicer
-    -> Traversal' Text (NonEmpty Text)
-_capturesInternal matcher getSliceRanges slicer f subject =
+_capturesInternal :: Matcher -> FromMatch -> Traversal' Text (NonEmpty Text)
+_capturesInternal matcher fromMatch f subject =
     traverse f captureLists <&> \captureLists' ->
         -- Swag foldl-as-foldr to create only as many segments as we need to
         -- stitch back together and no more.
@@ -1084,9 +1076,8 @@ _capturesInternal matcher getSliceRanges slicer f subject =
         in Text.concat $ foldr mkSegments termSegments triples 0
 
     where
-    sliceRangeLists = unsafeLazyStreamToList $
-        mapMS getSliceRanges $ matcher subject
-    captureLists = map (NE.map $ slicer subject) sliceRangeLists
+    sliceRangeLists = unsafeLazyStreamToList $ mapMS fromMatch $ matcher subject
+    captureLists = map (NE.map $ slice subject) sliceRangeLists
 
     mkSegments (SliceRange off offEnd, c, c') r prevOffEnd
         | off == fromIntegral pcre2_UNSET || c == c' =
@@ -1132,6 +1123,10 @@ getAllSliceRanges matchDataPtr = do
 
     getWhitelistedSliceRanges whitelist matchDataPtr
 
+-- | Placeholder for half-building a `Traversal'` to be passed to `has`.
+errorFromMatch :: FromMatch
+errorFromMatch _ = return $ error "BUG! Tried to use match results"
+
 -- | Match a pattern to a subject once and return a list of captures, or @[]@ if
 -- no match.
 captures :: Text -> Text -> [Text]
@@ -1139,8 +1134,7 @@ captures = capturesOpt mempty
 
 -- | @capturesOpt mempty = captures@
 capturesOpt :: Option -> Text -> Text -> [Text]
-capturesOpt option patt =
-    maybe [] NE.toList . preview (_capturesOpt option patt)
+capturesOpt option patt = maybe [] NE.toList . capturesAOpt option patt
 
 -- | Match a pattern to a subject once and return a non-empty list of captures
 -- in an `Alternative`, or `empty` if no match.  The non-empty list constructor
@@ -1178,10 +1172,8 @@ matches = matchesOpt mempty
 
 -- | @matchesOpt mempty = matches@
 matchesOpt :: Option -> Text -> Text -> Bool
-matchesOpt option patt = has $ _capturesInternal
-    (unsafePerformIO $ assembleMatcher option patt)
-    (const $ return noTouchy)
-    noTouchy
+matchesOpt option patt = has $ _capturesInternal matcher errorFromMatch where
+    matcher = unsafePerformIO $ assembleMatcher option patt
 
 -- | Match a pattern to a subject once and return the portion that matched in an
 -- `Alternative`, or `empty` if no match.
@@ -1275,8 +1267,7 @@ _captures = _capturesOpt mempty
 
 -- | @_capturesOpt mempty = _captures@
 _capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
-_capturesOpt option patt = _capturesInternal matcher getAllSliceRanges slice
-    where
+_capturesOpt option patt = _capturesInternal matcher getAllSliceRanges where
     matcher = unsafePerformIO $ assembleMatcher option patt
 
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
@@ -1289,7 +1280,7 @@ _match = _matchOpt mempty
 -- | @_matchOpt mempty = _match@
 _matchOpt :: Option -> Text -> Traversal' Text Text
 _matchOpt option patt = _cs . _headNE where
-    _cs = _capturesInternal matcher get0thSliceRanges slice
+    _cs = _capturesInternal matcher get0thSliceRanges
     matcher = unsafePerformIO $ assembleMatcher option patt
 
 -- * Support for Template Haskell compile-time regex analysis
