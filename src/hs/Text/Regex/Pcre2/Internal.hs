@@ -716,11 +716,7 @@ extractMatchEnv matchEnvCode = do
 
 -- | Helper for @assemble*@ functions.  Basically, extract all options and help
 -- produce a function that takes a `Text` subject.
-assembleSubjFun
-    :: (MatchEnv -> Text -> a)
-    -> Option
-    -> Text
-    -> IO (Text -> a)
+assembleSubjFun :: (MatchEnv -> Text -> a) -> Option -> Text -> IO (Text -> a)
 assembleSubjFun mkSubjFun option patt =
     runStateT extractAll (applyOption option) <&> \case
         (subjFun, []) -> subjFun
@@ -975,7 +971,7 @@ foreign import ccall "wrapper" mkCallout
 -- data to Haskell and present to the user function.  Ensure no pointers are
 -- leaked!
 getCalloutInfo :: Text -> Ptr Pcre2_callout_block -> IO CalloutInfo
-getCalloutInfo subject blockPtr = do
+getCalloutInfo calloutSubject blockPtr = do
     calloutIndex <- do
         str <- pcre2_callout_block_callout_string blockPtr
         if str == nullPtr
@@ -991,8 +987,6 @@ getCalloutInfo subject blockPtr = do
                 -- String callout
                 len <- pcre2_callout_block_callout_string_length blockPtr
                 CalloutName <$> Text.fromPtr (castCUs str) (fromIntegral len)
-
-    let calloutSubject = subject
 
     calloutCaptures <- do
         ovecPtr <- pcre2_callout_block_offset_vector blockPtr
