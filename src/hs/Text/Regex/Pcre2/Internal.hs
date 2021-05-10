@@ -15,7 +15,7 @@
 
 module Text.Regex.Pcre2.Internal where
 
-import           Control.Applicative        (Alternative(..))
+import           Control.Applicative        (Alternative)
 import           Control.Exception          hiding (TypeError)
 import           Control.Monad.State.Strict
 import           Data.Either                (partitionEithers)
@@ -486,11 +486,11 @@ applyOption = \case
     TwoOptions opt0 opt1 -> applyOption opt0 ++ applyOption opt1
 
     -- CompileOption
-    Anchored          -> [CompileOption pcre2_ANCHORED]
     AllowEmptyClass   -> [CompileOption pcre2_ALLOW_EMPTY_CLASS]
     AltBsuxLegacy     -> [CompileOption pcre2_ALT_BSUX]
     AltCircumflex     -> [CompileOption pcre2_ALT_CIRCUMFLEX]
     AltVerbNames      -> [CompileOption pcre2_ALT_VERBNAMES]
+    Anchored          -> [CompileOption pcre2_ANCHORED]
     AutoCallout       -> [CompileOption pcre2_AUTO_CALLOUT]
     Caseless          -> [CompileOption pcre2_CASELESS]
     DollarEndOnly     -> [CompileOption pcre2_DOLLAR_ENDONLY]
@@ -535,14 +535,14 @@ applyOption = \case
 
     -- MatchOption
     NotBol             -> [MatchOption pcre2_NOTBOL]
-    NotEol             -> [MatchOption pcre2_NOTEOL]
     NotEmpty           -> [MatchOption pcre2_NOTEMPTY]
     NotEmptyAtStart    -> [MatchOption pcre2_NOTEMPTY_ATSTART]
+    NotEol             -> [MatchOption pcre2_NOTEOL]
     PartialHard        -> [MatchOption pcre2_PARTIAL_HARD]
     PartialSoft        -> [MatchOption pcre2_PARTIAL_SOFT]
-    SubReplacementOnly -> [MatchOption pcre2_SUBSTITUTE_REPLACEMENT_ONLY]
     SubGlobal          -> [MatchOption pcre2_SUBSTITUTE_GLOBAL]
     SubLiteral         -> [MatchOption pcre2_SUBSTITUTE_LITERAL]
+    SubReplacementOnly -> [MatchOption pcre2_SUBSTITUTE_REPLACEMENT_ONLY]
     SubUnknownUnset    -> [MatchOption pcre2_SUBSTITUTE_UNKNOWN_UNSET]
     SubUnsetEmpty      -> [MatchOption pcre2_SUBSTITUTE_UNSET_EMPTY]
 
@@ -553,14 +553,14 @@ applyOption = \case
     UnsafeSubCallout f -> [SubCalloutOption f]
 
     -- MatchContextOption
-    OffsetLimit limit -> CompileOption pcre2_USE_OFFSET_LIMIT : unary
-        MatchContextOption pcre2_set_offset_limit (fromIntegral limit)
-    HeapLimit limit -> unary
-        MatchContextOption pcre2_set_heap_limit (fromIntegral limit)
-    MatchLimit limit -> unary
-        MatchContextOption pcre2_set_match_limit (fromIntegral limit)
     DepthLimit limit -> unary
         MatchContextOption pcre2_set_depth_limit (fromIntegral limit)
+    HeapLimit limit -> unary
+        MatchContextOption pcre2_set_heap_limit (fromIntegral limit)
+    OffsetLimit limit -> CompileOption pcre2_USE_OFFSET_LIMIT : unary
+        MatchContextOption pcre2_set_offset_limit (fromIntegral limit)
+    MatchLimit limit -> unary
+        MatchContextOption pcre2_set_match_limit (fromIntegral limit)
 
     where
     unary ctor f x = (: []) $ ctor $ \ctx -> withForeignPtr ctx $ \ctxPtr ->

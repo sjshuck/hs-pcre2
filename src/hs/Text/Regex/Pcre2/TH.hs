@@ -4,10 +4,8 @@
 
 module Text.Regex.Pcre2.TH where
 
-import           Control.Applicative        (Alternative(..))
-import           Data.Functor               ((<&>))
 import           Data.IORef
-import           Data.List.NonEmpty         (NonEmpty(..))
+import           Data.List.NonEmpty         (NonEmpty)
 import qualified Data.List.NonEmpty         as NE
 import           Data.Map.Lazy              (Map)
 import qualified Data.Map.Lazy              as Map
@@ -144,8 +142,6 @@ regex = QuasiQuoter {
     quoteType = const $ fail "regex: cannot produce a type",
 
     quoteDec = const $ fail "regex: cannot produce declarations"}
-
-
 
 -- | A global, optical variant of `regex`.  Can only be used as an expression.
 --
