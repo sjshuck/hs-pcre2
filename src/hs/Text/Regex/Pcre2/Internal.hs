@@ -28,7 +28,7 @@ import qualified Data.IntMap.Strict         as IM
 import           Data.List                  (foldl', intercalate)
 import           Data.List.NonEmpty         (NonEmpty(..))
 import qualified Data.List.NonEmpty         as NE
-import           Data.Monoid
+import           Data.Monoid                (Alt(..), Any(..), Endo(..))
 import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
@@ -129,8 +129,8 @@ type Traversal' s a = forall f. (Applicative f) => (a -> f a) -> s -> f s
 
 type Getting r s a = (a -> Const r a) -> s -> Const r s
 
-preview :: Getting (First a) s a -> s -> Maybe a
-preview l = getFirst . getConst . l (Const . First . Just)
+preview :: Getting (Alt Maybe a) s a -> s -> Maybe a
+preview = toAlternativeOf
 
 view :: Getting a s a -> s -> a
 view l = getConst . l Const
@@ -557,10 +557,10 @@ applyOption = \case
         MatchContextOption pcre2_set_depth_limit (fromIntegral limit)
     HeapLimit limit -> unary
         MatchContextOption pcre2_set_heap_limit (fromIntegral limit)
-    OffsetLimit limit -> CompileOption pcre2_USE_OFFSET_LIMIT : unary
-        MatchContextOption pcre2_set_offset_limit (fromIntegral limit)
     MatchLimit limit -> unary
         MatchContextOption pcre2_set_match_limit (fromIntegral limit)
+    OffsetLimit limit -> CompileOption pcre2_USE_OFFSET_LIMIT : unary
+        MatchContextOption pcre2_set_offset_limit (fromIntegral limit)
 
     where
     unary ctor f x = (: []) $ ctor $ \ctx -> withForeignPtr ctx $ \ctxPtr ->
@@ -605,7 +605,7 @@ _MatchContextOption f =
 type ExtractOpts = StateT [AppliedOption] IO
 
 -- | Use a fake @Prism'@ to extract a category of options.
-extractOptsOf :: Getting (First a) AppliedOption a -> ExtractOpts [a]
+extractOptsOf :: Getting (Alt Maybe a) AppliedOption a -> ExtractOpts [a]
 extractOptsOf traversal = state $ partitionEithers . map discrim where
     discrim opt = maybe (Right opt) Left $ preview traversal opt
 
