@@ -94,8 +94,8 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 --
 -- /__As a pattern__/
 --
--- This matches when the regex matches, whereupon any named captures are bound
--- to variables of the same names.
+-- This matches when the regex first matches, whereupon any named captures are
+-- bound to variables of the same names.
 --
 -- > case "submitted 2020-10-20" of
 -- >     [regex|(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})|] ->
@@ -114,7 +114,7 @@ regex = QuasiQuoter {
                 let wrap cs = Captures cs :: Captures $(return info)
                 in to wrap |]
 
-        [e| toAlternativeOf $
+        [e| toAlternativeOf1 $
             _capturesInternal $(matcherQ s) getAllSliceRanges . $(fromCsQ) |],
 
     quotePat = \s -> do

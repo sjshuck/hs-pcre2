@@ -15,7 +15,7 @@
 
 module Text.Regex.Pcre2.Internal where
 
-import           Control.Applicative        (Alternative)
+import           Control.Applicative        (Alternative(..))
 import           Control.Exception          hiding (TypeError)
 import           Control.Monad.State.Strict
 import           Data.Either                (partitionEithers)
@@ -146,6 +146,11 @@ toListOf l x = let build = Endo . (:) in view (l . to build) x `appEndo` []
 
 toAlternativeOf :: (Alternative f) => Getting (Alt f a) s a -> s -> f a
 toAlternativeOf l = let alt = Alt . pure in getAlt . view (l . to alt)
+
+-- | See https://github.com/sjshuck/hs-pcre2/issues/17.
+-- This should go away with https://github.com/sjshuck/hs-pcre2/issues/18.
+toAlternativeOf1 :: (Alternative f) => Getting (Alt Maybe a) s a -> s -> f a
+toAlternativeOf1 l = maybe empty pure . preview l
 
 _headNE :: Lens' (NonEmpty a) a
 _headNE f (x :| xs) = f x <&> (:| xs)
@@ -1145,7 +1150,7 @@ capturesA = capturesAOpt mempty
 --
 -- @since 1.1.0
 capturesAOpt :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
-capturesAOpt option patt = toAlternativeOf $ _capturesOpt option patt
+capturesAOpt option patt = toAlternativeOf1 $ _capturesOpt option patt
 
 -- | Match a pattern to a subject and lazily produce a list of all
 -- non-overlapping portions, with all capture groups, that matched.
@@ -1176,7 +1181,7 @@ match = matchOpt mempty
 
 -- | @matchOpt mempty = match@
 matchOpt :: (Alternative f) => Option -> Text -> Text -> f Text
-matchOpt option patt = toAlternativeOf $ _matchOpt option patt
+matchOpt option patt = toAlternativeOf1 $ _matchOpt option patt
 
 -- | Match a pattern to a subject and lazily return a list of all
 -- non-overlapping portions that matched.

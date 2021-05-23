@@ -221,6 +221,9 @@ bugFixes = do
             _                  ->
                 expectationFailure "quasi-quoted pattern didn't match"
 
+    issue 17 $ do
+        match "\\d+" "123 456" `shouldBe` ["123"]
+
     where
     issue :: Int -> Expectation -> Spec
     issue n = it $ "https://github.com/sjshuck/hs-pcre2/issues/" ++ show n
