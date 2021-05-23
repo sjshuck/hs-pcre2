@@ -1,13 +1,13 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.33.0.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 31554f80cf0112dda9453046d82fbd24ca1c7090ffa1e4ff1f3709967ca2326f
+-- hash: cb8596609200fe862c181845b59caabfdf1c2a19dc0f410828ecba4f7c2c4fe5
 
 name:           pcre2
-version:        1.1.4
+version:        1.1.5
 synopsis:       Regular expressions via the PCRE2 C library (included)
 description:    Please see the README on GitHub at <https://github.com/sjshuck/hs-pcre2>
 category:       Text

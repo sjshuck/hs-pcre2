@@ -1,5 +1,11 @@
 # Changelog and Acknowledgements
 
+## 1.1.5
+* Fixed [#17](https://github.com/sjshuck/pcre2/17), where functions returning
+  `Alternative` containers were not restricted to single results despite their
+  documentation.
+* Minor improvements to docs and examples.
+
 ## 1.1.4
 * Fixed some incorrect foreign imports' safety.
 
