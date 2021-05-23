@@ -89,8 +89,8 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 -- >             year = read @Int $ Text.unpack $ capture @"y" cs
 -- >             ...
 --
--- > forM_ ([regex|^\s+$|] line :: Maybe Text) $ \spaces ->
--- >     error $ "line has spaces only: " ++ show spaces
+-- > forM_ ([regex|\s+$|] line :: Maybe Text) $ \spaces -> error $
+-- >     "line has trailing spaces (" ++ show (Text.length spaces) ++ " characters)"
 --
 -- /__As a pattern__/
 --
