@@ -122,6 +122,8 @@ class CastCUs a b | a -> b where
 instance CastCUs CUShort Word16
 instance CastCUs Word16 CUShort
 
+type FfiWrapper f = f -> IO (FunPtr f)
+
 -- ** Lens types and utilities
 
 type Lens'      s a = forall f. (Functor f)     => (a -> f a) -> s -> f s
@@ -962,15 +964,11 @@ data CalloutState = CalloutState {
     calloutStateException :: Maybe SomeException,
     calloutStateSubsLog   :: IntMap SubCalloutResult}
 
--- | FFI wrapper.
-foreign import ccall "wrapper" mkRecursionGuard
-    :: (CUInt -> Ptr a -> IO CInt)
-    -> IO (FunPtr (CUInt -> Ptr a -> IO CInt))
+foreign import ccall "wrapper" mkRecursionGuard :: FfiWrapper
+    (CUInt -> Ptr a -> IO CInt)
 
--- | FFI wrapper.
-foreign import ccall "wrapper" mkCallout
-    :: (Ptr block -> Ptr a -> IO CInt)
-    -> IO (FunPtr (Ptr block -> Ptr a -> IO CInt))
+foreign import ccall "wrapper" mkCallout :: FfiWrapper
+    (Ptr block -> Ptr a -> IO CInt)
 
 -- | Within a callout, marshal the original subject and @pcre2_callout_block@
 -- data to Haskell and present to the user function.  Ensure no pointers are
