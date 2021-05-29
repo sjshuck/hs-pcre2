@@ -56,7 +56,7 @@ forMOf kv'd file $ execStateT $ do
 * Vast presentation of PCRE2 functionality.  We can even register Haskell
   callbacks to run during matching!
 * Few dependencies.
-* Bundled, statically-linked UTF-16 build of up-to-date PCRE2 (version 10.36),
+* Bundled, statically-linked UTF-16 build of up-to-date PCRE2 (version 10.37),
   with a complete, exposed Haskell binding.
 
 ## Wishlist

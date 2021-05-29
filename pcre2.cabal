@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: cb8596609200fe862c181845b59caabfdf1c2a19dc0f410828ecba4f7c2c4fe5
+-- hash: bf4c75f7fd078f489576f68a4180e3dee1c17d4cf890def7466cd94babf96c32
 
 name:           pcre2
 version:        1.1.5
@@ -109,7 +109,7 @@ library
       Paths_pcre2
   hs-source-dirs:
       src/hs
-  ghc-options: -optc=-DPCRE2_CODE_UNIT_WIDTH=16 -optc=-DPCRE2_STATIC=1 -optc=-Wno-discarded-qualifiers -optc=-Wno-incompatible-pointer-types
+  ghc-options: -optc=-DPCRE2_CODE_UNIT_WIDTH=16 -optc=-DPCRE2_STATIC=1 -optc=-DHAVE_INTTYPES_H=1 -optc=-DHAVE_LIMITS_H=1 -optc=-DHAVE_MEMMOVE_H=1 -optc=-DHAVE_STDINT_H=1 -optc=-DHAVE_STDLIB_H=1 -optc=-DHAVE_STRERROR_H=1 -optc=-DHAVE_STRING_H=1 -optc=-DSUPPORT_JIT=1 -optc=-DSUPPORT_PCRE2_16=1 -optc=-DSUPPORT_UNICODE=1 -optc=-Wno-discarded-qualifiers -optc=-Wno-incompatible-pointer-types
   cc-options: -DHAVE_CONFIG_H -DPCRE2_CODE_UNIT_WIDTH=16
   include-dirs:
       src/c
