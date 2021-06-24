@@ -341,8 +341,6 @@ data Option
     -- Incompatible with `NeverUcp`.
     | Ungreedy -- ^ Invert the effect of @?@.  Without it, quantifiers are
     -- non-greedy; with it, they are greedy.  Equivalent to @(?U)@.
-    | Utf -- ^ Treat both the pattern and subject as UTF rather than fixed-width
-    -- 16-bit code units.
 
     | UnsafeCompileRecGuard (Int -> IO Bool) -- ^ Run the given guard on every
     -- new descent into a level of parentheses, passing the current depth as
@@ -516,7 +514,6 @@ applyOption = \case
     NoStartOptimize   -> [CompileOption pcre2_NO_START_OPTIMIZE]
     Ucp               -> [CompileOption pcre2_UCP]
     Ungreedy          -> [CompileOption pcre2_UNGREEDY]
-    Utf               -> [CompileOption pcre2_UTF]
 
     -- ExtraCompileOption
     AltBsux            -> [CompileExtraOption pcre2_EXTRA_ALT_BSUX]

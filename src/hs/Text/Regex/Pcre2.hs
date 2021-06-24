@@ -300,8 +300,7 @@ module Text.Regex.Pcre2 (
         SubUnknownUnset,
         SubUnsetEmpty,
         Ucp,
-        Ungreedy,
-        Utf),
+        Ungreedy),
 
     Bsr(..),
     Newline(..),
