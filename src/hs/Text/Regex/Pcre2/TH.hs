@@ -1,5 +1,4 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Text.Regex.Pcre2.TH where
@@ -69,7 +68,7 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
                     `appT` litT (strTyLit $ Text.unpack name)    -- "foo"
                     `appT` litT (numTyLit $ fromIntegral number) -- 1
 
--- | /__As an expression__/
+-- | === As an expression
 --
 -- > regex :: (Alternative f) => String -> Text -> f (Captures info)
 --
@@ -78,8 +77,8 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 -- > regex :: (Alternative f) => String -> Text -> f Text
 --
 -- if there are none.  In other words, if there is more than the 0th capture,
--- this behaves like `capturesA` (except returning an opaque `Captures` instead
--- of a list), otherwise it behaves like `match`.
+-- this behaves like `captures` (except returning an opaque `Captures` instead
+-- of a `NonEmpty` list), otherwise it behaves like `match`.
 --
 -- To retrieve an individual capture from a `Captures`, use `capture`.
 --
@@ -92,7 +91,7 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 -- > forM_ ([regex|\s+$|] line :: Maybe Text) $ \spaces -> error $
 -- >     "line has trailing spaces (" ++ show (Text.length spaces) ++ " characters)"
 --
--- /__As a pattern__/
+-- === As a pattern
 --
 -- This matches when the regex first matches, whereupon any named captures are
 -- bound to variables of the same names.
@@ -114,7 +113,7 @@ regex = QuasiQuoter {
                 let wrap cs = Captures cs :: Captures $(return info)
                 in to wrap |]
 
-        [e| toAlternativeOf1 $
+        [e| toAlternativeOf $
             _capturesInternal $(matcherQ s) getAllSliceRanges . $(fromCsQ) |],
 
     quotePat = \s -> do

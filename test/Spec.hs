@@ -40,8 +40,8 @@ main = hspec $ do
         it "works using matches" $ do
             matches "(?i)foo" "FOO" `shouldBe` True
 
-        it "works using capturesA" $ do
-            case capturesA "(\\d{4})-(\\d{2})-(\\d{2})" submitted of
+        it "works using captures" $ do
+            case captures "(\\d{4})-(\\d{2})-(\\d{2})" submitted of
                 Just ne -> ne `shouldBe` "2020-10-20" :| ["2020", "10", "20"]
                 Nothing -> expectationFailure "didn't match"
 
@@ -181,7 +181,7 @@ main = hspec $ do
 
     describe "an unset capture" $ do
         it "is treated as empty" $ do
-            captures "(a)?" "" `shouldBe` ["", ""]
+            captures "(a)?" "" `shouldBe` Just ("" :| [""])
 
         it "is unchanged via Traversal'" $ do
             ("" & [_regex|(a)?|] . _capture @1 .~ "foo") `shouldBe` ""
@@ -215,15 +215,11 @@ bugFixes = do
         f "a" `shouldReturn` ""
         f "b" `shouldReturn` "b"
 
-    issue 12 $ do
-        captures ".a." "foo bar baz" `shouldBe` ["bar"]
-        case "foo bar baz" of
-            [regex|.a(?<x>.)|] -> return ()
-            _                  ->
-                expectationFailure "quasi-quoted pattern didn't match"
-
-    issue 17 $ do
-        match "\\d+" "123 456" `shouldBe` ["123"]
+    issue 18 $ do
+        let result :: (Alternative f) => f Text
+            result = match "\\d+" "123 456"
+        result `shouldBe` Just "123"
+        result `shouldBe` ["123", "456"]
 
     where
     issue :: Int -> Expectation -> Spec

@@ -99,12 +99,25 @@ module Text.Regex.Pcre2 (
     Note: Template Haskell regexes are immune from this problem and may be
     freely inlined; see below.
 
-    === __Handling errors__
+    === __Handling results and errors__
 
-    In a few places we use the `Alternative` typeclass to optionally return
-    match results, expressing success via `pure` and failure via `empty`.
-    Typically the user will choose the instance `Maybe`, but other useful ones
-    exist, notably @[STM](https://hackage.haskell.org/package/stm/docs/Control-Monad-STM.html#t:STM)@,
+    In a few places we use the `Alternative` typeclass to return match results,
+    expressing failure via `empty`.  Typically the user will choose from two
+    instances:
+
+    > b2 :: (Alternative f) => Text -> f Text
+    > b2 = match "b.."
+    >
+    > -- Maybe returns the first match only
+    > findB2 :: Text -> Maybe Text
+    > findB2 = b2
+    >
+    > -- [] returns all non-overlapping matches
+    > findAllB2s :: Text -> [Text]
+    > findAllB2s = b2
+
+    Other useful instances exist,
+    notably @[STM](https://hackage.haskell.org/package/stm/docs/Control-Monad-STM.html#t:STM)@,
     that of [optparse-applicative](https://hackage.haskell.org/package/optparse-applicative/docs/Options-Applicative.html#t:Parser),
     and those of parser combinator libraries such
     as [megaparsec](https://hackage.haskell.org/package/megaparsec/docs/Text-Megaparsec.html#t:ParsecT).
@@ -137,16 +150,10 @@ module Text.Regex.Pcre2 (
     -- ** Basic matching functions
     match,
     matchOpt,
-    matchAll,
-    matchAllOpt,
     matches,
     matchesOpt,
     captures,
     capturesOpt,
-    capturesA,
-    capturesAOpt,
-    capturesAll,
-    capturesAllOpt,
 
     -- ** PCRE2-native substitution
     sub,

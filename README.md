@@ -7,13 +7,16 @@ Regular expressions for Haskell.
 
 ## Teasers
 ```haskell
-embeddedLicensePlate :: Text -> Maybe Text
-embeddedLicensePlate = match "[A-Z]{3}[0-9]{3,4}"
+licensePlate :: Text -> Maybe Text
+licensePlate = match "[A-Z]{3}[0-9]{3,4}"
+
+licensePlates :: Text -> [Text]
+licensePlates = match "[A-Z]{3}[0-9]{3,4}"
 ```
 ```haskell
 case "The quick brown fox" of
-    [regex|brown\s+(?<animal>\w+)|] -> Text.putStrLn animal
-    _                               -> error "nothing brown"
+    [regex|\bbrown\s+(?<animal>[A-z]+)\b|] -> Text.putStrLn animal
+    _                                      -> error "nothing brown"
 ```
 ```haskell
 let kv'd = lined . packed . [_regex|(?x)  # Extended PCRE2 syntax
@@ -39,13 +42,14 @@ forMOf kv'd file $ execStateT $ do
 ```
 
 ## Features
-* Quiet functions with simple types&mdash;for the most part it's  
-`Text` _(pattern)_ `-> Text` _(subject)_ `-> result`.
-* Use partial application to create performant, compile-once-match-many code.
-* Low cognitive overhead&mdash;there's just one custom datatype for both compile
-  and match options, the `Option` monoid.
-* `Text` everywhere for interop with both C and the broader Haskell ecosystem.
-* Match failures expressed via `Alternative` or pattern match failures.
+* No opaque "`Regex`" object.  Instead, quiet functions with simple
+  types&mdash;for the most part it's `Text` _(pattern)_ `-> Text` _(subject)_
+  `-> result`.  Use partial application to create performant,
+  compile-once-match-many code.
+* No [custom typeclasses](https://hackage.haskell.org/package/regex-base/docs/Text-Regex-Base-RegexLike.html#t:RegexContext).
+* A single datatype for both compile and match options, the `Option` monoid.
+* `Text` everywhere.
+* Match success expressed via `Alternative`.
 * Opt-in Template Haskell facilities for compile-time verification of patterns,
   indexing captures, and memoizing inline regexes.
 * Opt-in `lens` support.
@@ -68,7 +72,7 @@ forMOf kv'd file $ execStateT $ do
   bottleneck,
   [pcre-light](https://hackage.haskell.org/package/pcre-light)/[-heavy](https://hackage.haskell.org/package/pcre-heavy)/[lens-regex-pcre](https://hackage.haskell.org/package/lens-regex-pcre)
   are recommended instead of this library for the very best performance.
-* Make use of DFA and JIT compilation.
+* Make use of DFA matching and JIT compilation.
 * Improve PCRE2 C compile time.
 * Add splitting support.
 
@@ -77,4 +81,4 @@ forMOf kv'd file $ execStateT $ do
 PCRE2 is distributed under the [3-clause BSD](https://www.pcre.org/licence.txt) license.
 
 ## Main Author
-&copy;2020 Shlomo Shuck
+&copy;2020&ndash;2021 Shlomo Shuck

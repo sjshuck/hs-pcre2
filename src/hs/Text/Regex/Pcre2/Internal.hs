@@ -149,11 +149,6 @@ toListOf l x = let build = Endo . (:) in view (l . to build) x `appEndo` []
 toAlternativeOf :: (Alternative f) => Getting (Alt f a) s a -> s -> f a
 toAlternativeOf l = let alt = Alt . pure in getAlt . view (l . to alt)
 
--- | See https://github.com/sjshuck/hs-pcre2/issues/17.
--- This should go away with https://github.com/sjshuck/hs-pcre2/issues/18.
-toAlternativeOf1 :: (Alternative f) => Getting (Alt Maybe a) s a -> s -> f a
-toAlternativeOf1 l = maybe empty pure . preview l
-
 _headNE :: Lens' (NonEmpty a) a
 _headNE f (x :| xs) = f x <&> (:| xs)
 
@@ -1119,44 +1114,22 @@ getAllSliceRanges matchDataPtr = do
 errorFromMatch :: FromMatch
 errorFromMatch _ = return $ error "BUG! Tried to use match results"
 
--- | Match a pattern to a subject once and return a list of captures, or @[]@ if
--- no match.
-captures :: Text -> Text -> [Text]
-captures = capturesOpt mempty
-
--- | @capturesOpt mempty = captures@
-capturesOpt :: Option -> Text -> Text -> [Text]
-capturesOpt option patt = maybe [] NE.toList . capturesAOpt option patt
-
--- | Match a pattern to a subject once and return a non-empty list of captures
--- in an `Alternative`, or `empty` if no match.  The non-empty list constructor
--- `:|` serves as a cue to differentiate the 0th capture from the others:
+-- | Match a pattern to a subject and return a non-empty list of captures in an
+-- `Alternative`, or `empty` if no match.  The non-empty list constructor `:|`
+-- serves as a cue to differentiate the 0th capture from the others:
 --
--- > let parseDate = capturesA "(\\d{4})-(\\d{2})-(\\d{2})"
+-- > let parseDate = captures "(\\d{4})-(\\d{2})-(\\d{2})"
 -- > in case parseDate "submitted 2020-10-20" of
 -- >     Just (date :| [y, m, d]) -> ...
 -- >     Nothing                  -> putStrLn "didn't match"
-capturesA :: (Alternative f) => Text -> Text -> f (NonEmpty Text)
-capturesA = capturesAOpt mempty
+captures :: (Alternative f) => Text -> Text -> f (NonEmpty Text)
+captures = capturesOpt mempty
 
--- | @capturesAOpt mempty = capturesA@
+-- | @capturesOpt mempty = captures@
 --
 -- @since 1.1.0
-capturesAOpt :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
-capturesAOpt option patt = toAlternativeOf1 $ _capturesOpt option patt
-
--- | Match a pattern to a subject and lazily produce a list of all
--- non-overlapping portions, with all capture groups, that matched.
---
--- @since 1.1.0
-capturesAll :: Text -> Text -> [NonEmpty Text]
-capturesAll = capturesAllOpt mempty
-
--- | @capturesAllOpt mempty = capturesAll@
---
--- @since 1.1.0
-capturesAllOpt :: Option -> Text -> Text -> [NonEmpty Text]
-capturesAllOpt option patt = toListOf $ _capturesOpt option patt
+capturesOpt :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
+capturesOpt option patt = toAlternativeOf $ _capturesOpt option patt
 
 -- | Does the pattern match the subject at least once?
 matches :: Text -> Text -> Bool
@@ -1167,27 +1140,14 @@ matchesOpt :: Option -> Text -> Text -> Bool
 matchesOpt option patt = has $ _capturesInternal matcher errorFromMatch where
     matcher = unsafePerformIO $ assembleMatcher option patt
 
--- | Match a pattern to a subject once and return the portion that matched in an
+-- | Match a pattern to a subject and return the portion that matched in an
 -- `Alternative`, or `empty` if no match.
 match :: (Alternative f) => Text -> Text -> f Text
 match = matchOpt mempty
 
 -- | @matchOpt mempty = match@
 matchOpt :: (Alternative f) => Option -> Text -> Text -> f Text
-matchOpt option patt = toAlternativeOf1 $ _matchOpt option patt
-
--- | Match a pattern to a subject and lazily return a list of all
--- non-overlapping portions that matched.
---
--- @since 1.1.0
-matchAll :: Text -> Text -> [Text]
-matchAll = matchAllOpt mempty
-
--- | @matchAllOpt mempty = matchAll@
---
--- @since 1.1.0
-matchAllOpt :: Option -> Text -> Text -> [Text]
-matchAllOpt option patt = toListOf $ _matchOpt option patt
+matchOpt option patt = toAlternativeOf $ _matchOpt option patt
 
 -- | Perform at most one substitution.  See
 -- [the docs](https://pcre.org/current/doc/html/pcre2api.html#SEC36) for the

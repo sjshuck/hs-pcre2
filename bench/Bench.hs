@@ -21,7 +21,7 @@ main :: IO ()
 main = defaultMain [
     bgroup "creating single-use regexes" [
         bench "pcre2" $ flip nf strings $ \(patt, subj) ->
-            let Just (_ :| [bar]) = capturesA (Text.pack patt) (Text.pack subj)
+            let Just (_ :| [bar]) = captures (Text.pack patt) (Text.pack subj)
             in Text.unpack bar,
 
         bench "regex-pcre-builtin" $ flip nf strings $ \(patt, subj) ->
@@ -36,7 +36,7 @@ main = defaultMain [
             in bar],
     
     bgroup "strings" [
-        let r = capturesA $ Text.pack stringPattern
+        let r = captures $ Text.pack stringPattern
         in bench "pcre2" $ flip nf stringSubject $ \subj ->
             let Just (_ :| [bar]) = r $ Text.pack subj in Text.unpack bar,
 
@@ -117,6 +117,6 @@ bgroupTexts label (patt, subj) = bgroup label [
     where
     textPattern = Text.pack patt
     textSubject = Text.pack subj
-    pcre2R = capturesA textPattern
+    pcre2R = captures textPattern
     regexBaseR = mkRegexBaseR patt
     pcreLightR = Text.Regex.PCRE.Light.Char8.compile patt []
