@@ -7,16 +7,17 @@
 
 module Main where
 
-import           Control.Applicative    (Alternative)
-import           Control.Exception      (catch, evaluate, handle)
-import           Control.Monad.RWS.Lazy (ask, evalRWS, forM_, tell, void)
+import           Control.Applicative     (Alternative)
+import           Control.Exception       (catch, evaluate, handle)
+import           Control.Monad.RWS.Lazy  (ask, evalRWS, forM_, tell, void)
 import           Data.IORef
-import           Data.List.NonEmpty     (NonEmpty(..))
-import           Data.Text              (Text)
-import qualified Data.Text              as Text
+import           Data.List.NonEmpty      (NonEmpty(..))
+import           Data.Text               (Text)
+import qualified Data.Text               as Text
 import           Lens.Micro.Platform
 import           Test.Hspec
 import           Text.Regex.Pcre2
+import           Text.Regex.Pcre2.Unsafe
 
 main :: IO ()
 main = hspec $ do

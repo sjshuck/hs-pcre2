@@ -47,6 +47,8 @@ import           Text.Regex.Pcre2.Foreign
 
 -- * General utilities
 
+type FfiWrapper f = f -> IO (FunPtr f)
+
 -- | There is no @nullForeignPtr@ to pass to `withForeignPtr`, so we have to
 -- fake it with a `Maybe`.
 withForeignOrNullPtr :: Maybe (ForeignPtr a) -> (Ptr a -> IO b) -> IO b
@@ -121,8 +123,6 @@ class CastCUs a b | a -> b where
     {-# INLINE castCUs #-}
 instance CastCUs CUShort Word16
 instance CastCUs Word16 CUShort
-
-type FfiWrapper f = f -> IO (FunPtr f)
 
 -- ** Lens types and utilities
 
@@ -238,6 +238,9 @@ type Subber = Text -> IO (CInt, Text)
 -- an alternative to specifying them as an `Option`.  See `Caseless` for
 -- example.
 --
+-- Most options are exported in "Text.Regex.Pcre2".  The callout interface is
+-- found in "Text.Regex.Pcre2.Unsafe".
+--
 -- Documentation is scant here.  For more complete, accurate information,
 -- including discussions of corner cases arising from specific combinations of
 -- options and pattern items, please see the [C API
@@ -257,8 +260,6 @@ data Option
     | AltVerbNames -- ^ Enable backslash escapes in verb names.  E.g.,
     -- @(*MARK:L\\(O\\)L)@.
     | Anchored -- ^ Equivalent to beginning pattern with @^@.
-    | AutoCallout -- ^ Run callout for every pattern item.  Only relevant if a
-    -- callout is set.
     | BadEscapeIsLiteral -- ^ Do not throw an error for unrecognized or
     -- malformed escapes.  /\"This is a dangerous option.\"/
     | Bsr Bsr -- ^ Override what @\\R@ matches (default given by `defaultBsr`).
@@ -340,31 +341,28 @@ data Option
     -- Incompatible with `NeverUcp`.
     | Ungreedy -- ^ Invert the effect of @?@.  Without it, quantifiers are
     -- non-greedy; with it, they are greedy.  Equivalent to @(?U)@.
-    | UnsafeCallout (CalloutInfo -> IO CalloutResult) -- ^ Run the given callout
-    -- at every callout point
-    -- (see [the docs](https://pcre.org/current/doc/html/pcre2callout.html) for
-    -- more info).  Multiples of this option before the rightmost are ignored.
-    --
-    -- /NOTE: The callout is run via `unsafePerformIO` within pure code!/
+    | Utf -- ^ Treat both the pattern and subject as UTF rather than fixed-width
+    -- 16-bit code units.
+
     | UnsafeCompileRecGuard (Int -> IO Bool) -- ^ Run the given guard on every
     -- new descent into a level of parentheses, passing the current depth as
     -- argument.  Returning @False@ aborts pattern compilation with an
     -- exception.  Multiples of this option before the rightmost are ignored.
     --
-    -- /NOTE: Currently (PCRE2 version 10\.35) patterns seem to be parsed in/
+    -- /NOTE: Currently (PCRE2 version 10\.37) patterns seem to be compiled in/
     -- /two passes, both times triggering the recursion guard.  Also, it is/
     -- /triggered at the beginning of the pattern, passing 0.  None of this is/
     -- /documented; expect the unexpected in the presence of side effects!/
-    --
-    -- /NOTE: The guard is run via `unsafePerformIO` within pure code!/
+    | UnsafeCallout (CalloutInfo -> IO CalloutResult) -- ^ Run the given callout
+    -- at every callout point
+    -- (see [the docs](https://pcre.org/current/doc/html/pcre2callout.html) for
+    -- more info).  Multiples of this option before the rightmost are ignored.
+    | AutoCallout -- ^ Run callout for every pattern item.  Only relevant if a
+    -- callout is set.
     | UnsafeSubCallout (SubCalloutInfo -> IO SubCalloutResult) -- ^ Run the
     -- given callout on every substitution.  This is at most once unless
     -- `SubGlobal` is set.  Multiples of this option before the rightmost are
     -- ignored.
-    --
-    -- /NOTE: The callout is run via `unsafePerformIO` within pure code!/
-    | Utf -- ^ Treat both the pattern and subject as UTF rather than fixed-width
-    -- 16-bit code units.
 
 instance Semigroup Option where
     (<>) = TwoOptions
@@ -1372,7 +1370,7 @@ type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
 -- > capture @3
 -- > capture @"bar"
 --
--- Specifying a nonexistant number or name will result in a type error.
+-- Specifying a nonexistent number or name will result in a type error.
 capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
     Captures info -> Text
 capture = view $ _capture @i

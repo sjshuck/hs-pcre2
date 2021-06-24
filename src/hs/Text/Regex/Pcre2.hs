@@ -1,7 +1,7 @@
 module Text.Regex.Pcre2 (
     -- * Matching and substitution
     {-|
-    /__Introduction__/
+    === __Introduction__
 
     Atop the low-level binding to the C API, we present a high-level interface
     to add regular expressions to Haskell programs.
@@ -45,7 +45,7 @@ module Text.Regex.Pcre2 (
     cognitive overhead, and (for lenses) library dependencies, so it\'s really a
     matter of finding the best trade-offs for her case.
 
-    /__Definitions__/
+    === __Definitions__
 
     [Pattern]:  The string defining a regular expression.  Refer to
     syntax [here](https://pcre.org/current/doc/html/pcre2pattern.html).
@@ -75,7 +75,7 @@ module Text.Regex.Pcre2 (
     @(?\<foo\>...)@.  Whether they have names or not, captures are always
     numbered as described above.
 
-    /__Performance__/
+    === __Performance__
 
     Each API function is designed such that, when a regex is obtained, the
     underlying C data generated from the pattern and any options is reused for
@@ -99,7 +99,7 @@ module Text.Regex.Pcre2 (
     Note: Template Haskell regexes are immune from this problem and may be
     freely inlined; see below.
 
-    /__Handling errors__/
+    === __Handling errors__
 
     In a few places we use the `Alternative` typeclass to optionally return
     match results, expressing success via `pure` and failure via `empty`.
@@ -111,9 +111,8 @@ module Text.Regex.Pcre2 (
 
     By contrast, user errors are thrown purely.  If a user error is to be
     caught, it must be at the site where the match or substitution results are
-    evaluated&#x2014;in other words, wherever the regex is applied to a subject.
-    Even pattern compile errors are deferred to match sites, due to the way this
-    library employs `System.IO.Unsafe.unsafePerformIO` to implement laziness.
+    evaluated.  As a particular consequence, pattern compile errors are deferred
+    to match sites.
 
     >>> broken = match "*"
     >>> broken "foo"
@@ -260,7 +259,6 @@ module Text.Regex.Pcre2 (
         AltCircumflex,
         AltVerbNames,
         Anchored,
-        AutoCallout,
         BadEscapeIsLiteral,
         Bsr,
         Caseless,
@@ -303,22 +301,10 @@ module Text.Regex.Pcre2 (
         SubUnsetEmpty,
         Ucp,
         Ungreedy,
-        UnsafeCallout,
-        UnsafeCompileRecGuard,
-        UnsafeSubCallout,
         Utf),
 
     Bsr(..),
     Newline(..),
-
-    -- ** Callout interface
-
-    CalloutInfo(..),
-    CalloutIndex(..),
-    CalloutResult(..),
-    -- *** Substitution callouts
-    SubCalloutInfo(..),
-    SubCalloutResult(..),
 
     -- * User errors
     SomePcre2Exception(),
