@@ -266,7 +266,6 @@ module Text.Regex.Pcre2 (
         AltCircumflex,
         AltVerbNames,
         Anchored,
-        BadEscapeIsLiteral,
         Bsr,
         Caseless,
         DepthLimit,

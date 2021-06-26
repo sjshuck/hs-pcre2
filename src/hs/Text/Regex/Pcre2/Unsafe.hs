@@ -1,23 +1,23 @@
-{-# OPTIONS_HADDOCK not-home #-}
-
+-- | These items are unsafe for one reason or another, and are sequestered here
+-- to require the user to do an extra import to get them.
+--
+-- Chief among
+-- them is the callout interface: these options and associated datatypes may be
+-- used to register effectful callbacks, sometimes referred to as /callouts/ in
+-- the PCRE2 API, for regex compilation, matching, and substitution.  We include
+-- them here for completeness and use them to implement unit tests for this
+-- library; for ordinary use, however, seek other means to accomplish whatever
+-- is needed (such as accreting effects with optics), since they carry all the
+-- problems of `unsafePerformIO`.  See
+-- the [C API docs](https://pcre.org/current/doc/html/pcre2callout.html)
+-- for more information.
 module Text.Regex.Pcre2.Unsafe (
-    -- * The callout interface
-    --
-    -- | These options and associated datatypes may be used to register
-    -- effectful callbacks, sometimes referred to as _callouts_ in the PCRE2
-    -- API, for regex compilation, matching, and substitution.  We include them
-    -- here for completeness and use them to implement unit tests for this
-    -- library; for ordinary use, however, see if other means can accomplish
-    -- whatever is needed (such as accreting effects with optics), since they
-    -- carry all the problems of `unsafePerformIO`.
-    --
-    -- See the [C API docs](https://pcre.org/current/doc/html/pcre2callout.html)
-    -- for more information.
-
+    -- ** Options
     Option(
-        UnsafeCompileRecGuard,
         AutoCallout,
+        BadEscapeIsLiteral,
         UnsafeCallout,
+        UnsafeCompileRecGuard,
         UnsafeSubCallout),
 
     -- ** Types
