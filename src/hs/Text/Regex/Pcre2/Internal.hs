@@ -1316,7 +1316,11 @@ type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
             -- else
             num
 
-    CaptNum (name :: Symbol) '(_, '(name, num) ': _) = num
+    -- FIXME See Text.Regex.Pcre2.TH, where we end the lookup table with a
+    -- placeholder entry due to a GHC bug.  We must ensure a successful name
+    -- lookup does not occur on this last entry; hence the extra promoted cons
+    -- operators in this pattern.
+    CaptNum (name :: Symbol) '(_, '(name, num) ': _ ': _) = num
     CaptNum (name :: Symbol) '(hi, _ ': kvs) = CaptNum name '(hi, kvs)
     CaptNum (name :: Symbol) _ = TypeError
         (TypeLits.Text "No capture named " :<>: ShowType name)

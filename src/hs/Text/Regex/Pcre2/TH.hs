@@ -1,13 +1,18 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module Text.Regex.Pcre2.TH where
 
+import           Control.Applicative        (Alternative(..))
+import           Data.Functor               ((<&>))
 import           Data.IORef
 import           Data.List.NonEmpty         (NonEmpty(..))
 import qualified Data.List.NonEmpty         as NE
 import           Data.Map.Lazy              (Map)
 import qualified Data.Map.Lazy              as Map
+import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
 import           Language.Haskell.TH
@@ -54,19 +59,25 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
     [] -> return Nothing
 
     -- One or more parenthesized captures.  Present
-    --     [Just "foo", Just "bar", Nothing]
+    --     [Just "foo", Nothing, Nothing, Just "bar"]
     -- as
-    --     '(3, '[ '("foo", 1), '("bar", 2)]).
+    --     '(4, '[ '("foo", 1), '("bar", 4), '("", 0)]).
     captureNames -> Just <$> promotedTupleT 2 `appT` hi `appT` kvs where
-        -- 3
+        -- 4
         hi = litT $ numTyLit $ fromIntegral $ length captureNames
-        -- '[ '("foo", 1), '("bar", 2)]
-        kvs = foldr f promotedNilT $ toKVs captureNames where
+        -- '[ '("foo", 1), '("bar", 4), '("", 0)]
+        kvs = foldr f end (toKVs captureNames) where
             -- '("foo", 1) ': ...
-            f (number, name) = appT $ appT promotedConsT $       -- ':
-                promotedTupleT 2                                 -- '(,)
+            f (number, name) r = promotedConsT `appT` kv `appT` r where
+                kv = promotedTupleT 2                            -- '(,)
                     `appT` litT (strTyLit $ Text.unpack name)    -- "foo"
                     `appT` litT (numTyLit $ fromIntegral number) -- 1
+        -- FIXME GHC kind-checks empty '[] as [*] instead of [k], which breaks
+        -- quasi-quoted regexes with parenthesized captures but no names.
+        -- Therefore, we avoid ever splicing an empty lookup table by ending it
+        -- with a placeholder entry (which cannot arise from a pattern since ""
+        -- is an invalid capture group name).
+        end = [t| '[ '("", 0)] |]
 
 -- | === As an expression
 --
@@ -108,15 +119,10 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 regex :: QuasiQuoter
 regex = QuasiQuoter {
     quoteExp = \s -> capturesInfoQ s >>= \case
-        Just info -> do
-            let toWrapQ = [e|
-                    let wrap cs = Captures cs :: Captures $(return info)
-                    in to wrap |]
-            [e| toAlternativeOf $
-                _capturesInternal $(matcherQ s) getAllSlices . $(toWrapQ) |]
-        Nothing -> do
-            [e| toAlternativeOf $
-                _capturesInternal $(matcherQ s) get0thSlice . _Identity |],
+        Nothing   -> [e| matchTH (Text.pack $(stringE s)) |]
+        Just info -> [e| capturesTH
+            (Text.pack $(stringE s))
+            (Proxy :: Proxy $(return info)) |],
 
     quotePat = \s -> do
         captureNames <- predictCaptureNamesQ s
@@ -125,24 +131,48 @@ regex = QuasiQuoter {
             -- No named captures.  Test whether the string matches without
             -- creating any new Text values.
             Nothing -> viewP
-                [e| has $ _capturesInternal $(matcherQ s) nilFromMatch |]
+                [e| matchesTH (Text.pack $(stringE s)) |]
                 [p| True |]
 
             -- One or more named captures.  Attempt to bind only those to local
             -- variables of the same names.
             Just numberedNames -> viewP e p where
                 (numbers, names) = NE.unzip numberedNames
-                e = [e|
-                    let _cs = _capturesInternal
-                            $(matcherQ s)
-                            (getWhitelistedSlices $(liftData numbers))
-                    in view $ _cs . to NE.toList |]
+                e = [e| capturesNumberedTH
+                    (Text.pack $(stringE s))
+                    $(liftData numbers) |]
                 p = foldr f wildP names where
                     f name r = conP '(:) [varP $ mkName $ Text.unpack name, r],
 
     quoteType = const $ fail "regex: cannot produce a type",
 
     quoteDec = const $ fail "regex: cannot produce declarations"}
+
+capturesTH :: (Alternative f) =>
+    Text -> Proxy info -> Text -> f (Captures info)
+capturesTH patt _ = toAlternativeOf $
+    _capturesInternal (memoMatcher patt) getAllSlices . to Captures
+
+matchTH :: (Alternative f) => Text -> Text -> f Text
+matchTH patt = toAlternativeOf $
+    _capturesInternal (memoMatcher patt) get0thSlice . _Identity
+
+matchesTH :: Text -> Text -> Bool
+matchesTH patt = has $ _capturesInternal (memoMatcher patt) nilFromMatch
+
+capturesNumberedTH :: Text -> NonEmpty Int -> Text -> [Text]
+capturesNumberedTH patt numbers = concatMap NE.toList . toListOf _cs where
+    _cs = _capturesInternal (memoMatcher patt) fromMatch
+    fromMatch = getWhitelistedSlices numbers
+
+_matchTH :: Text -> Traversal' Text Text
+_matchTH patt = _capturesInternal (memoMatcher patt) get0thSlice . _Identity
+
+_capturesTH ::
+    Text -> Proxy info -> Traversal' Text (Captures info)
+_capturesTH patt _ = _cs . wrapped where
+    _cs = _capturesInternal (memoMatcher patt) getAllSlices
+    wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
 
 -- | A global, optical variant of `regex`.  Can only be used as an expression.
 --
@@ -159,18 +189,13 @@ regex = QuasiQuoter {
 -- > main = putStrLn $ "There are 14 competing standards" & embeddedNumber %~ (+ 1)
 -- >
 -- > -- There are 15 competing standards
---
 _regex :: QuasiQuoter
 _regex = QuasiQuoter {
-    quoteExp = \s -> capturesInfoQ s >>= \case
-        Just info -> do
-            let wrappedQ = [e|
-                    let wrapped :: Lens' (NonEmpty Text) (Captures $(return info))
-                        wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
-                    in wrapped |]
-            [e| _capturesInternal $(matcherQ s) getAllSlices . $(wrappedQ) |]
-        Nothing -> do
-            [e| _capturesInternal $(matcherQ s) get0thSlice . _Identity |],
+    quoteExp  = \s -> capturesInfoQ s >>= \case
+        Nothing   -> [e| _matchTH (Text.pack $(stringE s)) |]
+        Just info -> [e| _capturesTH
+            (Text.pack $(stringE s))
+            (Proxy :: Proxy $(return info)) |],
 
     quotePat = const $ fail "_regex: cannot produce a pattern",
 
