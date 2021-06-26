@@ -4,7 +4,7 @@
 module Text.Regex.Pcre2.TH where
 
 import           Data.IORef
-import           Data.List.NonEmpty         (NonEmpty)
+import           Data.List.NonEmpty         (NonEmpty(..))
 import qualified Data.List.NonEmpty         as NE
 import           Data.Map.Lazy              (Map)
 import qualified Data.Map.Lazy              as Map
@@ -22,7 +22,7 @@ globalMatcherCache :: IORef (Map Text Matcher)
 globalMatcherCache = unsafePerformIO $ newIORef Map.empty
 {-# NOINLINE globalMatcherCache #-}
 
--- | Given a `Text`, create or retrieve a `Matcher` from the global cache.
+-- | Given a pattern, create or retrieve a `Matcher` from the global cache.
 memoMatcher :: Text -> Matcher
 memoMatcher patt = unsafePerformIO $ do
     cache <- readIORef globalMatcherCache
@@ -107,14 +107,16 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 -- If there are no named captures, this simply acts as a guard.
 regex :: QuasiQuoter
 regex = QuasiQuoter {
-    quoteExp = \s -> do
-        let fromCsQ = capturesInfoQ s >>= maybe [e| _headNE |] toWrapQ
-            toWrapQ info = [e|
-                let wrap cs = Captures cs :: Captures $(return info)
-                in to wrap |]
-
-        [e| toAlternativeOf $
-            _capturesInternal $(matcherQ s) getAllSliceRanges . $(fromCsQ) |],
+    quoteExp = \s -> capturesInfoQ s >>= \case
+        Just info -> do
+            let toWrapQ = [e|
+                    let wrap cs = Captures cs :: Captures $(return info)
+                    in to wrap |]
+            [e| toAlternativeOf $
+                _capturesInternal $(matcherQ s) getAllSlices . $(toWrapQ) |]
+        Nothing -> do
+            [e| toAlternativeOf $
+                _capturesInternal $(matcherQ s) get0thSlice . _Identity |],
 
     quotePat = \s -> do
         captureNames <- predictCaptureNamesQ s
@@ -123,7 +125,7 @@ regex = QuasiQuoter {
             -- No named captures.  Test whether the string matches without
             -- creating any new Text values.
             Nothing -> viewP
-                [e| has $ _capturesInternal $(matcherQ s) errorFromMatch |]
+                [e| has $ _capturesInternal $(matcherQ s) nilFromMatch |]
                 [p| True |]
 
             -- One or more named captures.  Attempt to bind only those to local
@@ -133,7 +135,7 @@ regex = QuasiQuoter {
                 e = [e|
                     let _cs = _capturesInternal
                             $(matcherQ s)
-                            (getWhitelistedSliceRanges $(liftData numbers))
+                            (getWhitelistedSlices $(liftData numbers))
                     in view $ _cs . to NE.toList |]
                 p = foldr f wildP names where
                     f name r = conP '(:) [varP $ mkName $ Text.unpack name, r],
@@ -160,14 +162,15 @@ regex = QuasiQuoter {
 --
 _regex :: QuasiQuoter
 _regex = QuasiQuoter {
-    quoteExp = \s -> do
-        let fromCsQ = capturesInfoQ s >>= maybe [e| _headNE |] wrappedQ
-            wrappedQ info = [e|
-                let wrapped :: Lens' (NonEmpty Text) (Captures $(return info))
-                    wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
-                in wrapped |]
-
-        [e| _capturesInternal $(matcherQ s) getAllSliceRanges . $(fromCsQ) |],
+    quoteExp = \s -> capturesInfoQ s >>= \case
+        Just info -> do
+            let wrappedQ = [e|
+                    let wrapped :: Lens' (NonEmpty Text) (Captures $(return info))
+                        wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
+                    in wrapped |]
+            [e| _capturesInternal $(matcherQ s) getAllSlices . $(wrappedQ) |]
+        Nothing -> do
+            [e| _capturesInternal $(matcherQ s) get0thSlice . _Identity |],
 
     quotePat = const $ fail "_regex: cannot produce a pattern",
 

@@ -19,9 +19,11 @@ import           Control.Applicative        (Alternative(..))
 import           Control.Exception          hiding (TypeError)
 import           Control.Monad.State.Strict
 import           Data.Either                (partitionEithers)
+import           Data.Foldable              (toList)
 import           Data.Function              ((&))
 import           Data.Functor               ((<&>))
 import           Data.Functor.Const         (Const(..))
+import           Data.Functor.Identity      (Identity(..))
 import           Data.IORef
 import           Data.IntMap.Strict         (IntMap)
 import qualified Data.IntMap.Strict         as IM
@@ -95,23 +97,23 @@ fix3 x y z f = fix f x y z
 
 -- ** Fast @Text@ slicing
 
-data SliceRange = SliceRange
+data Slice = Slice
     {-# UNPACK #-} !Text.I16
     {-# UNPACK #-} !Text.I16
 
 -- | Zero-copy slice a 'Text'.  An unset capture is represented by a
 -- `pcre2_UNSET` range and is interpreted in this library as `Text.empty`.
-thinSlice :: Text -> SliceRange -> Text
-thinSlice text (SliceRange off offEnd)
+thinSlice :: Text -> Slice -> Text
+thinSlice text (Slice off offEnd)
     | off == fromIntegral pcre2_UNSET = Text.empty
     | otherwise                       = text
         & Text.takeWord16 offEnd
         & Text.dropWord16 off
 
 -- | Slice a 'Text', copying if it\'s less than half of the original.
-slice :: Text -> SliceRange -> Text
-slice text sliceRange =
-    let substring = thinSlice text sliceRange
+smartSlice :: Text -> Slice -> Text
+smartSlice text slice =
+    let substring = thinSlice text slice
     in if Text.length substring > Text.length text `div` 2
         then substring
         else Text.copy substring
@@ -149,8 +151,8 @@ toListOf l x = let build = Endo . (:) in view (l . to build) x `appEndo` []
 toAlternativeOf :: (Alternative f) => Getting (Alt f a) s a -> s -> f a
 toAlternativeOf l = let alt = Alt . pure in getAlt . view (l . to alt)
 
-_headNE :: Lens' (NonEmpty a) a
-_headNE f (x :| xs) = f x <&> (:| xs)
+_Identity :: Lens' (Identity a) a
+_Identity f (Identity x) = Identity <$> f x
 
 -- ** Streaming support
 
@@ -603,8 +605,8 @@ type ExtractOpts = StateT [AppliedOption] IO
 
 -- | Use a fake @Prism'@ to extract a category of options.
 extractOptsOf :: Getting (Alt Maybe a) AppliedOption a -> ExtractOpts [a]
-extractOptsOf traversal = state $ partitionEithers . map discrim where
-    discrim opt = maybe (Right opt) Left $ preview traversal opt
+extractOptsOf prism = state $ partitionEithers . map discrim where
+    discrim opt = maybe (Right opt) Left $ preview prism opt
 
 -- | Prepare to compile a `Code`.
 extractCompileEnv :: ExtractOpts CompileEnv
@@ -988,7 +990,7 @@ getCalloutInfo calloutSubject blockPtr = do
             [start, end] <- forM [0, 1] $ peekElemOff ovecPtr . (n * 2 +)
             return $ if start == pcre2_UNSET
                 then Nothing
-                else Just $ slice calloutSubject $ SliceRange
+                else Just $ smartSlice calloutSubject $ Slice
                     (fromIntegral start)
                     (fromIntegral end)
 
@@ -1027,7 +1029,7 @@ getSubCalloutInfo subCalloutSubject blockPtr = do
             [start, end] <- forM [0, 1] $ peekElemOff ovecPtr . (n * 2 +)
             return $ if start == pcre2_UNSET
                 then Nothing
-                else Just $ slice subCalloutSubject $ SliceRange
+                else Just $ smartSlice subCalloutSubject $ Slice
                     (fromIntegral start)
                     (fromIntegral end)
 
@@ -1048,25 +1050,24 @@ maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
 -- * Packaging @Matcher@s and @Subber@s as public API functions
 
 -- | The most general form of a matching function, which can also be used as a
--- @Setter'@ to perform substitutions at the Haskell level.  Operates globally.
---
--- Internal only!  Users should not (have to) know about `Matcher`.
-_capturesInternal :: Matcher -> FromMatch -> Traversal' Text (NonEmpty Text)
+-- @Setter'@ to perform substitutions at the Haskell level.
+_capturesInternal :: (Traversable t) =>
+    Matcher -> FromMatch t -> Traversal' Text (t Text)
 _capturesInternal matcher fromMatch f subject =
-    traverse f captureLists <&> \captureLists' ->
+    traverse f captureTs <&> \captureTs' ->
         -- Swag foldl-as-foldr to create only as many segments as we need to
         -- stitch back together and no more.
         let triples = concat $ zipWith3 zip3
-                (map NE.toList sliceRangeLists)
-                (map NE.toList captureLists)
-                (map NE.toList captureLists')
+                (map toList sliceTs)
+                (map toList captureTs)
+                (map toList captureTs')
         in Text.concat $ foldr mkSegments termSegments triples 0
 
     where
-    sliceRangeLists = unsafeLazyStreamToList $ mapMS fromMatch $ matcher subject
-    captureLists = map (NE.map $ slice subject) sliceRangeLists
+    sliceTs = unsafeLazyStreamToList $ mapMS fromMatch $ matcher subject
+    captureTs = map (smartSlice subject <$>) sliceTs
 
-    mkSegments (SliceRange off offEnd, c, c') r prevOffEnd
+    mkSegments (Slice off offEnd, c, c') r prevOffEnd
         | off == fromIntegral pcre2_UNSET || c == c' =
             -- This substring is unset or unchanged.  Keep going without making
             -- cuts.
@@ -1074,45 +1075,55 @@ _capturesInternal matcher fromMatch f subject =
         | otherwise =
             -- Emit the subject up until here, and the new substring, and keep
             -- going, remembering where we are now.
-            thinSlice subject (SliceRange prevOffEnd off) : c' : r offEnd
+            thinSlice subject (Slice prevOffEnd off) : c' : r offEnd
     termSegments off =
         let offEnd = fromIntegral $ Text.length subject
         -- If the terminal segment is empty, omit it altogether.  That way,
-        -- `Text.concat` can just return the subject without copying anything in
+        -- Text.concat can just return the subject without copying anything in
         -- cases where no substring is changed.
-        in [thinSlice subject (SliceRange off offEnd) | off /= offEnd]
+        in [thinSlice subject (Slice off offEnd) | off /= offEnd]
 
--- | A function that takes a C match result and extracts a list of captures.  We
--- need to pass this effectful callback to `_capturesInternal` because of the
--- latter\'s imperative loop that reuses the same @pcre2_match_data@ block.
-type FromMatch = Ptr Pcre2_match_data -> IO (NonEmpty SliceRange)
+-- | A function that takes a C match result and extracts captures into a
+-- container.  We need to pass this effectful callback to `_capturesInternal`
+-- because of the latter\'s imperative loop that reuses the same
+-- @pcre2_match_data@ block.
+--
+-- The container type is polymorphic and in practice carries a `Traversable`
+-- constraint.  Currently the following containers are used:
+--
+-- * `NonEmpty` when we want multiple capture groups;
+--
+-- * `Identity` when we only want the 0th;
+--
+-- * `Proxy` when we are only checking if a match succeeded.
+type FromMatch t = Ptr Pcre2_match_data -> IO (t Slice)
 
 -- | Read all specifically indexed captures\' offsets from match results.
-getWhitelistedSliceRanges :: NonEmpty Int -> FromMatch
-getWhitelistedSliceRanges whitelist matchDataPtr = do
+getWhitelistedSlices :: (Traversable t) => t Int -> FromMatch t
+getWhitelistedSlices whitelist matchDataPtr = do
     ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
     let peekOvec :: Int -> IO Text.I16
         peekOvec = fmap fromIntegral . peekElemOff ovecPtr
 
-    forM whitelist $ \i -> liftM2 SliceRange
+    forM whitelist $ \i -> liftM2 Slice
         (peekOvec $ i * 2)
         (peekOvec $ i * 2 + 1)
 
 -- | Read just the 0th capture\'s offsets from match results.
-get0thSliceRanges :: FromMatch
-get0thSliceRanges = getWhitelistedSliceRanges $ 0 :| []
+get0thSlice :: FromMatch Identity
+get0thSlice = getWhitelistedSlices $ Identity 0
 
 -- | Read all captures\' offsets from match results.
-getAllSliceRanges :: FromMatch
-getAllSliceRanges matchDataPtr = do
+getAllSlices :: FromMatch NonEmpty
+getAllSlices matchDataPtr = do
     count <- fromIntegral <$> pcre2_get_ovector_count matchDataPtr
     let whitelist = 0 :| [1 .. count - 1]
 
-    getWhitelistedSliceRanges whitelist matchDataPtr
+    getWhitelistedSlices whitelist matchDataPtr
 
--- | Placeholder for half-building a `Traversal'` to be passed to `has`.
-errorFromMatch :: FromMatch
-errorFromMatch _ = return $ error "BUG! Tried to use match results"
+-- | Placeholder for building a `Traversal'` to be passed to `has`.
+nilFromMatch :: FromMatch Proxy
+nilFromMatch _ = return Proxy
 
 -- | Match a pattern to a subject and return a non-empty list of captures in an
 -- `Alternative`, or `empty` if no match.  The non-empty list constructor `:|`
@@ -1137,7 +1148,7 @@ matches = matchesOpt mempty
 
 -- | @matchesOpt mempty = matches@
 matchesOpt :: Option -> Text -> Text -> Bool
-matchesOpt option patt = has $ _capturesInternal matcher errorFromMatch where
+matchesOpt option patt = has $ _capturesInternal matcher nilFromMatch where
     matcher = unsafePerformIO $ assembleMatcher option patt
 
 -- | Match a pattern to a subject and return the portion that matched in an
@@ -1219,7 +1230,7 @@ _captures = _capturesOpt mempty
 
 -- | @_capturesOpt mempty = _captures@
 _capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
-_capturesOpt option patt = _capturesInternal matcher getAllSliceRanges where
+_capturesOpt option patt = _capturesInternal matcher getAllSlices where
     matcher = unsafePerformIO $ assembleMatcher option patt
 
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
@@ -1231,8 +1242,8 @@ _match = _matchOpt mempty
 
 -- | @_matchOpt mempty = _match@
 _matchOpt :: Option -> Text -> Traversal' Text Text
-_matchOpt option patt = _cs . _headNE where
-    _cs = _capturesInternal matcher get0thSliceRanges
+_matchOpt option patt = _cs . _Identity where
+    _cs = _capturesInternal matcher get0thSlice
     matcher = unsafePerformIO $ assembleMatcher option patt
 
 -- * Support for Template Haskell compile-time regex analysis
