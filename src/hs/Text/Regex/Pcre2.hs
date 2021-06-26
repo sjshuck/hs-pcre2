@@ -272,7 +272,6 @@ module Text.Regex.Pcre2 (
         DepthLimit,
         DollarEndOnly,
         DotAll,
-        DupNames,
         EndAnchored,
         EscapedCrIsLf,
         Extended,

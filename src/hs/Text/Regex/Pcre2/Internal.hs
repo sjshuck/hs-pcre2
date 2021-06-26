@@ -268,7 +268,6 @@ data Option
     -- subject.
     | DotAll -- ^ A dot also matches a (single-character) newline.  Equivalent
     -- to @(?s)@.
-    | DupNames -- ^ Allow non-unique capture names.
     | EndAnchored -- ^ More or less like ending pattern with @$@.
     | EscapedCrIsLf -- ^ Interpret @\\r@ as @\\n@.
     | Extended -- ^ In the pattern, ignore whitespace, and enable comments
@@ -495,7 +494,6 @@ applyOption = \case
     Caseless          -> [CompileOption pcre2_CASELESS]
     DollarEndOnly     -> [CompileOption pcre2_DOLLAR_ENDONLY]
     DotAll            -> [CompileOption pcre2_DOTALL]
-    DupNames          -> [CompileOption pcre2_DUPNAMES]
     EndAnchored       -> [CompileOption pcre2_ENDANCHORED]
     Extended          -> [CompileOption pcre2_EXTENDED]
     ExtendedMore      -> [CompileOption pcre2_EXTENDED_MORE]
