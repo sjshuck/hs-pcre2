@@ -1,7 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -12,6 +11,7 @@ import           Control.Exception       (catch, evaluate, handle)
 import           Control.Monad.RWS.Lazy  (ask, evalRWS, forM_, tell, void)
 import           Data.IORef
 import           Data.List.NonEmpty      (NonEmpty(..))
+import           Data.Proxy              (Proxy(..))
 import           Data.Text               (Text)
 import qualified Data.Text               as Text
 import           Lens.Micro.Platform
@@ -45,6 +45,15 @@ main = hspec $ do
                 Just ne -> ne `shouldBe` "2020-10-20" :| ["2020", "10", "20"]
                 Nothing -> expectationFailure "didn't match"
 
+        it "is lazy" $ do
+            counter <- newIORef (0 :: Int)
+            let callout = UnsafeCallout $ \_ -> do
+                    modifyIORef counter (+ 1)
+                    return CalloutProceed
+            take 3 (matchOpt callout "(?C1)a" "apples and bananas")
+                `shouldBe` ["a", "a", "a"]
+            readIORef counter `shouldReturn` 3
+
     describe "lens-powered matching" $ do
         let _nee :: Traversal' Text Text
             _nee = _match "(?i)\\bnee\\b"
@@ -54,14 +63,14 @@ main = hspec $ do
             let result = evalRWS
                     (promptNee "We are the knights who say...NEE!")
                     "NOO"
-                    undefined
+                    Proxy
             result `shouldBe` ("We are the knights who say...NOO!", ["NEE"])
 
         it "signals match failure by not targeting anything" $ do
             let result = evalRWS
                     (promptNee "Shhhhh")
-                    undefined
-                    undefined
+                    (error "should be unreachable")
+                    Proxy
             result `shouldBe` ("Shhhhh", [])
 
         it "does not substitute when setting equal Text" $ do
@@ -114,13 +123,13 @@ main = hspec $ do
                 `shouldThrow` anyPcre2Exception
 
         it "are catchable using Control.Exception.evaluate" $ do
-            let example = evaluate (broken "foo") `catch`
-                    \(_ :: SomePcre2Exception) -> return Nothing
+            let example = handle @SomePcre2Exception (\_ -> return Nothing) $
+                    evaluate $ broken "foo"
             example `shouldReturn` Nothing
 
         it "are catchable using instance Alternative IO" $ do
-            let example = broken "foo" `catch`
-                    \(_ :: SomePcre2Exception) -> return "broken"
+            let example = handle @SomePcre2Exception (\_ -> return "broken") $
+                    broken "foo"
             example `shouldReturn` "broken"
 
     describe "native substitution" $ do
@@ -184,27 +193,18 @@ main = hspec $ do
             captures "(a)?" "" `shouldBe` Just ("" :| [""])
 
         it "is unchanged via Traversal'" $ do
-            ("" & [_regex|(a)?|] . _capture @1 .~ "foo") `shouldBe` ""
+            set ([_regex|(a)?|] . _capture @1) "foo" "" `shouldBe` ""
 
         it "permits other captures to be changed via Traversal'" $ do
-            ("" & [_regex|(a)?|] . _capture @0 .~ "foo") `shouldBe` "foo"
+            set ([_regex|(a)?|] . _capture @0) "foo" "" `shouldBe` "foo"
 
     describe "Traversal'" $ do
         it "supports global substitutions" $ do
-            ("apples and bananas" & _match "a" .~ "o")
+            set (_match "a") "o" "apples and bananas"
                 `shouldBe` "opples ond bononos"
 
-        it "is lazy" $ do
-            counter <- newIORef (0 :: Int)
-            let callout = UnsafeCallout $ \_ -> do
-                    modifyIORef counter (+ 1)
-                    return CalloutProceed
-            take 3 ("apples and bananas" ^.. _matchOpt callout "(?C1)a")
-                `shouldBe` ["a", "a", "a"]
-            readIORef counter `shouldReturn` 3
-
         it "converges in the presence of empty matches" $ do
-            length (toListOf [_regex||] "12345") `shouldBe` 6
+            length (match @[] "" "12345") `shouldBe` 6
 
     describe "bug fixes" bugFixes
 
@@ -249,7 +249,7 @@ anyPcre2Exception _ = True
 broken :: (Alternative f) => Text -> f Text
 broken = match "*"
 
--- microlens doesn't have this yet as of 12/5/2020
+-- microlens doesn't have this yet as of 06/26/2021
 _Show :: (Read a, Show a) => Traversal' String a
 _Show f s = case reads s of
     [(x, "")] -> show <$> f x

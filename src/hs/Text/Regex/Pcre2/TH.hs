@@ -39,10 +39,6 @@ memoMatcher patt = unsafePerformIO $ do
                 (Map.insert patt matcher cache, ())
             return matcher
 
--- | Generate code to produce \(and memoize\) a `Matcher` from a pattern.
-matcherQ :: String -> ExpQ
-matcherQ s = [e| memoMatcher $ Text.pack $(stringE s) |]
-
 -- | Predict parenthesized captures \(maybe named\) of a pattern at splice time.
 predictCaptureNamesQ :: String -> Q [Maybe Text]
 predictCaptureNamesQ = runIO . predictCaptureNames mempty . Text.pack
@@ -78,6 +74,36 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
         -- with a placeholder entry (which cannot arise from a pattern since ""
         -- is an invalid capture group name).
         end = [t| '[ '("", 0)] |]
+
+-- | Helper for `regex` with no parenthesized captures.
+matchTH :: (Alternative f) => Text -> Text -> f Text
+matchTH patt = toAlternativeOf $
+    _capturesInternal (memoMatcher patt) get0thSlice . _Identity
+
+-- | Helper for `regex` with parenthesized captures.
+capturesTH :: (Alternative f) => Text -> Proxy info -> Text -> f (Captures info)
+capturesTH patt _ = toAlternativeOf $
+    _capturesInternal (memoMatcher patt) getAllSlices . to Captures
+
+-- | Helper for `regex` as a guard pattern.
+matchesTH :: Text -> Text -> Bool
+matchesTH patt = has $ _capturesInternal (memoMatcher patt) nilFromMatch
+
+-- | Helper for `regex` as a pattern that binds local variables.
+capturesNumberedTH :: Text -> NonEmpty Int -> Text -> [Text]
+capturesNumberedTH patt numbers = concatMap NE.toList . toListOf _cs where
+    _cs = _capturesInternal (memoMatcher patt) fromMatch
+    fromMatch = getWhitelistedSlices numbers
+
+-- | Helper for `_regex` with no parenthesized captures.
+_matchTH :: Text -> Traversal' Text Text
+_matchTH patt = _capturesInternal (memoMatcher patt) get0thSlice . _Identity
+
+-- | Helper for `_regex` with parenthesized captures.
+_capturesTH :: Text -> Proxy info -> Traversal' Text (Captures info)
+_capturesTH patt _ = _cs . wrapped where
+    _cs = _capturesInternal (memoMatcher patt) getAllSlices
+    wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
 
 -- | === As an expression
 --
@@ -147,32 +173,6 @@ regex = QuasiQuoter {
     quoteType = const $ fail "regex: cannot produce a type",
 
     quoteDec = const $ fail "regex: cannot produce declarations"}
-
-capturesTH :: (Alternative f) =>
-    Text -> Proxy info -> Text -> f (Captures info)
-capturesTH patt _ = toAlternativeOf $
-    _capturesInternal (memoMatcher patt) getAllSlices . to Captures
-
-matchTH :: (Alternative f) => Text -> Text -> f Text
-matchTH patt = toAlternativeOf $
-    _capturesInternal (memoMatcher patt) get0thSlice . _Identity
-
-matchesTH :: Text -> Text -> Bool
-matchesTH patt = has $ _capturesInternal (memoMatcher patt) nilFromMatch
-
-capturesNumberedTH :: Text -> NonEmpty Int -> Text -> [Text]
-capturesNumberedTH patt numbers = concatMap NE.toList . toListOf _cs where
-    _cs = _capturesInternal (memoMatcher patt) fromMatch
-    fromMatch = getWhitelistedSlices numbers
-
-_matchTH :: Text -> Traversal' Text Text
-_matchTH patt = _capturesInternal (memoMatcher patt) get0thSlice . _Identity
-
-_capturesTH ::
-    Text -> Proxy info -> Traversal' Text (Captures info)
-_capturesTH patt _ = _cs . wrapped where
-    _cs = _capturesInternal (memoMatcher patt) getAllSlices
-    wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
 
 -- | A global, optical variant of `regex`.  Can only be used as an expression.
 --
