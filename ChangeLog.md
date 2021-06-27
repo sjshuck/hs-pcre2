@@ -1,5 +1,36 @@
 # Changelog and Acknowledgements
 
+## 2.0.0
+This release introduces significant breaking changes in order to make the API
+smaller, more consistent, and safer.
+* Implemented [#18](https://github.com/sjshuck/hs-pcre2/issues/18):
+    * Removed `matchAll`, `matchAllOpt`, `capturesAll`, and `capturesAllOpt`.
+    * Upgraded `match`, `matchOpt`, `captures`, and `capturesOpt` to offer their
+      functionality, respectively.
+    * Renamed `capturesA` and `capturesAOpt` to `captures` and `capturesOpt`,
+      replacing the latter two functions altogether.  `captures`/-`Opt` were
+      intended to be extreme
+      [convenience functions](https://hackage.haskell.org/package/pcre2-1.1.5/docs/Text-Regex-Pcre2.html#v:captures)
+      that required no special datatypes beyond the `Prelude`.  However, this
+      was of doubtful benefit, since that's false anyway&mdash;they required
+      `Text`, not to mention `{-# LANGUAGE OverloadedStrings #-}`.  Their names
+      are simple and valuable, and no other `Alternative`-producing function has
+      the naming convention "-`A`", so repurposing their names was in order.
+* Moved the callout interface to a new module, `Text.Regex.Pcre2.Unsafe`.  This
+  includes the options `UnsafeCompileRecGuard`, `UnsafeCallout`,
+  `UnsafeSubCallout`, and `AutoCallout`, and the types `CalloutInfo`,
+  `CalloutIndex`, `CalloutResult`, `SubCalloutInfo`, and `SubCalloutResult`.
+* Also moved option `BadEscapeIsLiteral` there.
+* Removed the ineffectual options `DupNames` and `Utf`.
+
+Other improvements with no API impact:
+* Updated PCRE2 to 10.37.
+* Replaced copied C files with symlinks, diminishing codebase by 1.5K lines and
+  simplifying future PCRE2 updates.
+* Reduced size of Template Haskell splices to make error messages less
+  obnoxious.
+* Moderate refactoring of internals and documentation.
+
 ## 1.1.5
 * Fixed [#17](https://github.com/sjshuck/hs-pcre2/issues/17), where functions
   returning `Alternative` containers were not restricted to single results

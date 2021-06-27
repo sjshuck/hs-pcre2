@@ -1123,20 +1123,22 @@ getAllSlices matchDataPtr = do
 nilFromMatch :: FromMatch Proxy
 nilFromMatch _ = return Proxy
 
--- | Match a pattern to a subject and return a non-empty list of captures in an
--- `Alternative`, or `empty` if no match.  The non-empty list constructor `:|`
--- serves as a cue to differentiate the 0th capture from the others:
+-- | Match a pattern to a subject and return some non-empty list(s) of captures
+-- in an `Alternative`, or `empty` if no match.  The non-empty list constructor
+-- `:|` serves as a cue to differentiate the 0th capture from the others:
 --
 -- > let parseDate = captures "(\\d{4})-(\\d{2})-(\\d{2})"
 -- > in case parseDate "submitted 2020-10-20" of
 -- >     Just (date :| [y, m, d]) -> ...
 -- >     Nothing                  -> putStrLn "didn't match"
+--
+-- @since 2.0.0
 captures :: (Alternative f) => Text -> Text -> f (NonEmpty Text)
 captures = capturesOpt mempty
 
 -- | @capturesOpt mempty = captures@
 --
--- @since 1.1.0
+-- @since 2.0.0
 capturesOpt :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
 capturesOpt option patt = toAlternativeOf $ _capturesOpt option patt
 
@@ -1149,8 +1151,10 @@ matchesOpt :: Option -> Text -> Text -> Bool
 matchesOpt option patt = has $ _capturesInternal matcher nilFromMatch where
     matcher = unsafePerformIO $ assembleMatcher option patt
 
--- | Match a pattern to a subject and return the portion that matched in an
+-- | Match a pattern to a subject and return the portion(s) that matched in an
 -- `Alternative`, or `empty` if no match.
+--
+-- @since 2.0.0
 match :: (Alternative f) => Text -> Text -> f Text
 match = matchOpt mempty
 
@@ -1187,7 +1191,7 @@ subOpt option patt replacement = snd . unsafePerformIO . subber where
     subber = unsafePerformIO $ assembleSubber replacement option patt
 
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
--- a subject to each non-empty list of captures that pattern matches globally.
+-- a subject to each non-empty list of captures that pattern matches.
 --
 -- Substitution works in the following way:  If a capture is set such that the
 -- new `Text` is not equal to the old one, a substitution occurs, otherwise it
@@ -1232,7 +1236,7 @@ _capturesOpt option patt = _capturesInternal matcher getAllSlices where
     matcher = unsafePerformIO $ assembleMatcher option patt
 
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
--- a subject to the portions of it that match.
+-- a subject to the non-overlapping portions of it that match.
 --
 -- @_match = `_captures` patt . ix 0@
 _match :: Text -> Traversal' Text Text

@@ -1,11 +1,11 @@
 name:                pcre2
-version:             1.1.5
+version:             2.0.0
 github:              "sjshuck/hs-pcre2"
 license:             Apache-2.0
 license-file:        LICENSE # [LICENSE, src/c/pcre2/LICENCE] doesn't work with stack sdist
 author:              "Shlomo Shuck and contributors"
 maintainer:          "stevenjshuck@gmail.com"
-copyright:           "2020 Shlomo Shuck"
+copyright:           "2020-2021 Shlomo Shuck"
 
 extra-source-files:
 - README.md

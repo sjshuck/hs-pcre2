@@ -99,24 +99,37 @@ module Text.Regex.Pcre2 (
     Note: Template Haskell regexes are immune from this problem and may be
     freely inlined; see below.
 
+    Also of note is the optimization that, for each capture that\'s more than
+    half the length of the subject, a zero-copy `Text` is produced in constant
+    time and space.  This can yield a large performance boost in many cases,
+    for example when splitting lines into key-value pairs as in
+    the [teaser](https://github.com/sjshuck/hs-pcre2#teasers).  A downside,
+    however, is that retaining these slices in memory will carry the overhead
+    of the dead portions of the subject (still guaranteed to be less than the
+    slices in total size).
+
     === __Handling results and errors__
 
-    In a few places we use the `Alternative` typeclass to return match results,
-    expressing failure via `empty`.  Typically the user will choose from two
-    instances:
+    In contrast to [other](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/match)
+    [APIs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/matchAll)&mdash;including
+    previous versions of [this library](https://github.com/sjshuck/hs-pcre2/issues/17)&mdash;where
+    there are separate functions to request single versus global matching, we
+    accomplish this /(since 2.0.0)/ in a unified fashion using the `Alternative`
+    typeclass.  Typically the user will choose from two instances, `Maybe` and
+    `[]`:
 
     > b2 :: (Alternative f) => Text -> f Text
     > b2 = match "b.."
     >
-    > -- Maybe returns the first match only
+    > -- Zero or one match
     > findB2 :: Text -> Maybe Text
     > findB2 = b2
     >
-    > -- [] returns all non-overlapping matches
+    > -- Zero or more matches
     > findAllB2s :: Text -> [Text]
     > findAllB2s = b2
 
-    Other useful instances exist,
+    Other instances exist for niche uses,
     notably @[STM](https://hackage.haskell.org/package/stm/docs/Control-Monad-STM.html#t:STM)@,
     that of [optparse-applicative](https://hackage.haskell.org/package/optparse-applicative/docs/Options-Applicative.html#t:Parser),
     and those of parser combinator libraries such
@@ -128,6 +141,8 @@ module Text.Regex.Pcre2 (
     to match sites.
 
     >>> broken = match "*"
+    >>> :t broken
+    broken :: Alternative f => Text -> f Text
     >>> broken "foo"
     *** Exception: pcre2_compile: quantifier does not follow a repeatable item
                         *
@@ -136,14 +151,13 @@ module Text.Regex.Pcre2 (
     `Control.Exception.evaluate` comes in handy to force results into the `IO`
     monad in order to catch errors reliably:
 
-    >>> evaluate (broken "foo") `catch` \(_ :: SomePcre2Exception) -> return Nothing
+    >>> :set -XTypeApplications
+    >>> handle @SomePcre2Exception (\_ -> return Nothing) $ evaluate $ broken "foo"
     Nothing
 
     Or simply select `IO` as the `Alternative` instance:
 
-    >>> :t broken
-    broken :: Alternative f => Text -> f Text
-    >>> broken "foo" `catch` \(_ :: SomePcre2Exception) -> return "broken"
+    >>> handle @SomePcre2Exception (\_ -> return "broken") $ broken "foo"
     "broken"
     -}
 

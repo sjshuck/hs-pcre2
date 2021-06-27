@@ -34,7 +34,7 @@ main = defaultMain [
             let r = Text.Regex.PCRE.Light.Char8.compile patt []
                 Just [_, bar] = Text.Regex.PCRE.Light.Char8.match r subj []
             in bar],
-    
+
     bgroup "strings" [
         let r = captures $ Text.pack stringPattern
         in bench "pcre2" $ flip nf stringSubject $ \subj ->
