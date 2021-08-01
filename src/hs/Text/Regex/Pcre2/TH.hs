@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -15,6 +16,7 @@ import qualified Data.Map.Lazy              as Map
 import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
+import           GHC.TypeLits               (Nat, Symbol)
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Quote
 import           Language.Haskell.TH.Syntax
@@ -47,6 +49,12 @@ predictCaptureNamesQ = runIO . predictCaptureNames mempty . Text.pack
 toKVs :: [Maybe Text] -> [(Int, Text)]
 toKVs names = [(number, name) | (number, Just name) <- zip [1 ..] names]
 
+-- | Helper for constructing an empty name-to-number lookup table.  If we splice
+-- `promotedNilT` directly, we would have to require the user to turn on either
+-- @KindSignatures@ or @PolyKinds@; GHC seems to monokind @'[]@ as @[*]@,
+-- instead of unifying it with the list inside `CapturesInfo`.
+type NoNamedCaptures = '[] :: [(Symbol, Nat)]
+
 -- | Generate the data-kinded phantom type parameter of `Captures` of a pattern,
 -- if needed.
 capturesInfoQ :: String -> Q (Maybe Type)
@@ -58,22 +66,18 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
     --     [Just "foo", Nothing, Nothing, Just "bar"]
     -- as
     --     '(4, '[ '("foo", 1), '("bar", 4), '("", 0)]).
-    captureNames -> Just <$> promotedTupleT 2 `appT` hi `appT` kvs where
+    captureNames -> Just <$> promotedTupleT 2 `appT` hiQ `appT` kvsQ where
         -- 4
-        hi = litT $ numTyLit $ fromIntegral $ length captureNames
+        hiQ = litT $ numTyLit $ fromIntegral $ length captureNames
         -- '[ '("foo", 1), '("bar", 4), '("", 0)]
-        kvs = foldr f end (toKVs captureNames) where
-            -- '("foo", 1) ': ...
-            f (number, name) r = promotedConsT `appT` kv `appT` r where
-                kv = promotedTupleT 2                            -- '(,)
-                    `appT` litT (strTyLit $ Text.unpack name)    -- "foo"
-                    `appT` litT (numTyLit $ fromIntegral number) -- 1
-        -- FIXME GHC kind-checks empty '[] as [*] instead of [k], which breaks
-        -- quasi-quoted regexes with parenthesized captures but no names.
-        -- Therefore, we avoid ever splicing an empty lookup table by ending it
-        -- with a placeholder entry (which cannot arise from a pattern since ""
-        -- is an invalid capture group name).
-        end = [t| '[ '("", 0)] |]
+        kvsQ = case toKVs captureNames of
+            []  -> [t| NoNamedCaptures |]
+            kvs -> foldr f promotedNilT kvs
+        -- '("foo", 1) ': ...
+        f (number, name) r = promotedConsT `appT` kvQ `appT` r where
+            kvQ = promotedTupleT 2                            -- '(,)
+                `appT` litT (strTyLit $ Text.unpack name)    -- "foo"
+                `appT` litT (numTyLit $ fromIntegral number) -- 1
 
 -- | Helper for `regex` with no parenthesized captures.
 matchTH :: (Alternative f) => Text -> Text -> f Text
@@ -87,7 +91,7 @@ capturesTH patt _ = toAlternativeOf $
 
 -- | Helper for `regex` as a guard pattern.
 matchesTH :: Text -> Text -> Bool
-matchesTH patt = has $ _capturesInternal (memoMatcher patt) nilFromMatch
+matchesTH patt = has $ _capturesInternal (memoMatcher patt) getNoSlices
 
 -- | Helper for `regex` as a pattern that binds local variables.
 capturesNumberedTH :: Text -> NonEmpty Int -> Text -> [Text]

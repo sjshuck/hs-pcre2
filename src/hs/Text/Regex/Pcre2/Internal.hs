@@ -63,9 +63,9 @@ mkForeignPtr finalize create = create >>= Conc.newForeignPtr <*> finalize
 -- | Helper so we never leak untracked 'FunPtr's.
 mkFunPtr :: ForeignPtr b -> IO (FunPtr a) -> IO (FunPtr a)
 mkFunPtr anchor create = do
-    fPtr <- create
-    Conc.addForeignPtrFinalizer anchor $ freeHaskellFunPtr fPtr
-    return fPtr
+    funPtr <- create
+    Conc.addForeignPtrFinalizer anchor $ freeHaskellFunPtr funPtr
+    return funPtr
 
 safeLast :: [a] -> Maybe a
 safeLast [] = Nothing
@@ -510,7 +510,7 @@ applyOption = \case
     Ucp               -> [CompileOption pcre2_UCP]
     Ungreedy          -> [CompileOption pcre2_UNGREEDY]
 
-    -- ExtraCompileOption
+    -- CompileExtraOption
     AltBsux            -> [CompileExtraOption pcre2_EXTRA_ALT_BSUX]
     BadEscapeIsLiteral -> [CompileExtraOption pcre2_EXTRA_BAD_ESCAPE_IS_LITERAL]
     EscapedCrIsLf      -> [CompileExtraOption pcre2_EXTRA_ESCAPED_CR_IS_LF]
@@ -630,7 +630,7 @@ extractCompileEnv = do
         f <- recGuard
         Just $ liftIO $ do
             eRef <- newIORef Nothing
-            fPtr <- mkFunPtr ctx $ mkRecursionGuard $ \depth _ -> do
+            funPtr <- mkFunPtr ctx $ mkRecursionGuard $ \depth _ -> do
                 resultOrE <- try $ do
                     f <- evaluate f
                     result <- f $ fromIntegral depth
@@ -639,9 +639,9 @@ extractCompileEnv = do
                     Right success -> return $ if success then 0 else 1
                     Left e        -> writeIORef eRef (Just e) >> return 1
 
-            withForeignPtr ctx $ \ctxPtr -> do
-                result <- pcre2_set_compile_recursion_guard ctxPtr fPtr nullPtr
-                check (== 0) result
+            withForeignPtr ctx $ \ctxPtr ->
+                pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>=
+                    check (== 0)
 
             return eRef
 
@@ -884,7 +884,7 @@ mkMatchTempEnv (MatchEnv {..}) subject
 
         -- Install callout, if any
         forM_ matchEnvCallout $ \f -> do
-            fPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
+            funPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
                 info <- getCalloutInfo subject blockPtr
                 resultOrE <- try $ do
                     f <- evaluate f
@@ -900,11 +900,11 @@ mkMatchTempEnv (MatchEnv {..}) subject
                             calloutStateException = Just e}
                         return pcre2_ERROR_CALLOUT
             withForeignPtr ctx $ \ctxPtr ->
-                pcre2_set_callout ctxPtr fPtr nullPtr >>= check (== 0)
+                pcre2_set_callout ctxPtr funPtr nullPtr >>= check (== 0)
 
         -- Install substitution callout, if any
         forM_ matchEnvSubCallout $ \f -> do
-            fPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
+            funPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
                 info <- getSubCalloutInfo subject blockPtr
                 resultOrE <- try $ do
                     f <- evaluate f
@@ -926,7 +926,7 @@ mkMatchTempEnv (MatchEnv {..}) subject
                             calloutStateException = Just e}
                         return (-1)
             withForeignPtr ctx $ \ctxPtr -> do
-                result <- pcre2_set_substitute_callout ctxPtr fPtr nullPtr
+                result <- pcre2_set_substitute_callout ctxPtr funPtr nullPtr
                 check (== 0) result
 
         return $ MatchTempEnv {
@@ -1120,8 +1120,8 @@ getAllSlices matchDataPtr = do
     getWhitelistedSlices whitelist matchDataPtr
 
 -- | Placeholder for building a `Traversal'` to be passed to `has`.
-nilFromMatch :: FromMatch Proxy
-nilFromMatch _ = return Proxy
+getNoSlices :: FromMatch Proxy
+getNoSlices _ = return Proxy
 
 -- | Match a pattern to a subject and return some non-empty list(s) of captures
 -- in an `Alternative`, or `empty` if no match.  The non-empty list constructor
@@ -1148,7 +1148,7 @@ matches = matchesOpt mempty
 
 -- | @matchesOpt mempty = matches@
 matchesOpt :: Option -> Text -> Text -> Bool
-matchesOpt option patt = has $ _capturesInternal matcher nilFromMatch where
+matchesOpt option patt = has $ _capturesInternal matcher getNoSlices where
     matcher = unsafePerformIO $ assembleMatcher option patt
 
 -- | Match a pattern to a subject and return the portion(s) that matched in an
@@ -1318,11 +1318,7 @@ type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
             -- else
             num
 
-    -- FIXME See Text.Regex.Pcre2.TH, where we end the lookup table with a
-    -- placeholder entry due to a GHC bug.  We must ensure a successful name
-    -- lookup does not occur on this last entry; hence the extra promoted cons
-    -- operators in this pattern.
-    CaptNum (name :: Symbol) '(_, '(name, num) ': _ ': _) = num
+    CaptNum (name :: Symbol) '(_, '(name, num) ': _) = num
     CaptNum (name :: Symbol) '(hi, _ ': kvs) = CaptNum name '(hi, kvs)
     CaptNum (name :: Symbol) _ = TypeError
         (TypeLits.Text "No capture named " :<>: ShowType name)
@@ -1400,7 +1396,7 @@ getErrorMessage errorCode = unsafePerformIO $ do
 -- | Most PCRE2 C functions return an @int@ indicating a possible error.  Test
 -- it against a predicate, and throw an exception upon failure.
 check :: (CInt -> Bool) -> CInt -> IO ()
-check p x = unless (p x) $ throwIO $ Pcre2Exception x
+check p = unless . p <*> throwIO . Pcre2Exception
 
 -- * PCRE2 compile-time config
 
