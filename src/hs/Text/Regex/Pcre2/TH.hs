@@ -35,11 +35,9 @@ memoMatcher patt = unsafePerformIO $ do
     cache <- readIORef globalMatcherCache
     case Map.lookup patt cache of
         Just matcher -> return matcher
-        Nothing      -> do
-            let matcher = unsafePerformIO $ assembleMatcher mempty patt
-            atomicModifyIORef' globalMatcherCache $ \cache ->
-                (Map.insert patt matcher cache, ())
-            return matcher
+        Nothing      -> atomicModifyIORef' globalMatcherCache $ \cache ->
+            let matcher = pureUserMatcher mempty patt
+            in (Map.insert patt matcher cache, matcher)
 
 -- | Predict parenthesized captures \(maybe named\) of a pattern at splice time.
 predictCaptureNamesQ :: String -> Q [Maybe Text]
@@ -65,17 +63,18 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
     -- One or more parenthesized captures.  Present
     --     [Just "foo", Nothing, Nothing, Just "bar"]
     -- as
-    --     '(4, '[ '("foo", 1), '("bar", 4), '("", 0)]).
+    --     '(4, '[ '("foo", 1), '("bar", 4)]).
     captureNames -> Just <$> promotedTupleT 2 `appT` hiQ `appT` kvsQ where
         -- 4
         hiQ = litT $ numTyLit $ fromIntegral $ length captureNames
         -- '[ '("foo", 1), '("bar", 4), '("", 0)]
         kvsQ = case toKVs captureNames of
+            -- We can't splice '[] because it doesn't kind-check.  See above.
             []  -> [t| NoNamedCaptures |]
             kvs -> foldr f promotedNilT kvs
         -- '("foo", 1) ': ...
         f (number, name) r = promotedConsT `appT` kvQ `appT` r where
-            kvQ = promotedTupleT 2                            -- '(,)
+            kvQ = promotedTupleT 2                           -- '(,)
                 `appT` litT (strTyLit $ Text.unpack name)    -- "foo"
                 `appT` litT (numTyLit $ fromIntegral number) -- 1
 

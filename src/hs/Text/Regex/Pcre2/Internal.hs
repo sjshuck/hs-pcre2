@@ -691,7 +691,7 @@ data MatchEnv = MatchEnv {
     matchEnvCallout    :: Maybe (CalloutInfo -> IO CalloutResult),
     matchEnvSubCallout :: Maybe (SubCalloutInfo -> IO SubCalloutResult)}
 
--- | Prepare a matching function.
+-- | Prepare a matching function after compiling the underlying @pcre2_code@.
 extractMatchEnv :: Code -> ExtractOpts MatchEnv
 extractMatchEnv matchEnvCode = do
     matchEnvOpts <- bitOr <$> extractOptsOf _MatchOption
@@ -711,26 +711,21 @@ extractMatchEnv matchEnvCode = do
 
     return $ MatchEnv {..}
 
--- | Helper for @assemble*@ functions.  Basically, extract all options and help
--- produce a function that takes a `Text` subject.
-assembleSubjFun :: (MatchEnv -> Text -> a) -> Option -> Text -> IO (Text -> a)
-assembleSubjFun mkSubjFun option patt =
-    runStateT extractAll (applyOption option) <&> \case
-        (subjFun, []) -> subjFun
-        _             -> error "BUG! Options not fully extracted"
-
+-- | Generate, from user-supplied `Option`s and pattern, a `MatchEnv` that can
+-- be reused for matching or substituting.
+userMatchEnv :: Option -> Text -> IO MatchEnv
+userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
+    (matchEnv, []) -> matchEnv
+    _              -> error "BUG! Options not fully extracted"
     where
     extractAll = do
         compileEnv <- extractCompileEnv
         code <- extractCode patt compileEnv
-        matchEnv <- extractMatchEnv code
+        extractMatchEnv code
 
-        return $ mkSubjFun matchEnv
-
--- | Produce a `Matcher` from user-supplied `Option` and pattern.
-assembleMatcher :: Option -> Text -> IO Matcher
-assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) subject ->
-    StreamEffect $
+-- | A `MatchEnv` is sufficient to fully implement a matching function.
+matcherWithEnv :: MatchEnv -> Matcher
+matcherWithEnv matchEnv@(MatchEnv {..}) subject = StreamEffect $
     withForeignPtr matchEnvCode $ \codePtr ->
     withMatchDataFromCode codePtr $ \matchDataPtr ->
     Text.useAsPtr subject $ \subjPtr subjCUs -> do
@@ -774,6 +769,11 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) subject ->
             pcre2_match_data_create_from_pattern codePtr nullPtr
         withForeignPtr matchData action
 
+-- | Helper to generate public matching functions.
+pureUserMatcher :: Option -> Text -> Matcher
+pureUserMatcher option patt = matcherWithEnv matchEnv where
+    matchEnv = unsafePerformIO $ userMatchEnv option patt
+
 -- | A `Subber` works by first writing results to a reasonably-sized buffer.  If
 -- we run out of room, PCRE2 allows us to simulate the rest of the substitution
 -- without writing anything, in order to calculate how big the buffer actually
@@ -790,14 +790,8 @@ assembleMatcher = assembleSubjFun $ \matchEnv@(MatchEnv {..}) subject ->
 -- Therefore, the first time, log the substitution callout indexes that had run
 -- along with their results, and replay the log the second time, returning those
 -- same results without re-incurring effects.
-assembleSubber
-    :: Text      -- ^ replacement
-    -> Option
-    -> Text      -- ^ pattern
-    -> IO Subber
-assembleSubber replacement = assembleSubjFun $ \firstMatchEnv@(MatchEnv {..}) ->
-    -- Subber
-    \subject ->
+subberWithEnv :: MatchEnv -> Text -> Subber
+subberWithEnv firstMatchEnv@(MatchEnv {..}) replacement subject =
     withForeignPtr matchEnvCode $ \codePtr ->
     Text.useAsPtr subject $ \subjPtr subjCUs ->
     Text.useAsPtr replacement $ \replPtr replCUs ->
@@ -859,6 +853,12 @@ assembleSubber replacement = assembleSubjFun $ \firstMatchEnv@(MatchEnv {..}) ->
                         result <- run 0 ctxPtr outBufPtr
                         maybeRethrow matchTempEnvRef
                         checkAndGetOutput result outBufPtr
+
+-- | Helper to generate substitution function.  For consistency with
+-- `pureUserMatcher`.
+pureUserSubber :: Option -> Text -> Text -> Subber
+pureUserSubber option patt =
+    subberWithEnv $ unsafePerformIO $ userMatchEnv option patt
 
 -- | Generate per-call data for @pcre2_match()@ etc., to accommodate callouts.
 --
@@ -1149,7 +1149,7 @@ matches = matchesOpt mempty
 -- | @matchesOpt mempty = matches@
 matchesOpt :: Option -> Text -> Text -> Bool
 matchesOpt option patt = has $ _capturesInternal matcher getNoSlices where
-    matcher = unsafePerformIO $ assembleMatcher option patt
+    matcher = pureUserMatcher option patt
 
 -- | Match a pattern to a subject and return the portion(s) that matched in an
 -- `Alternative`, or `empty` if no match.
@@ -1188,7 +1188,7 @@ gsub = subOpt SubGlobal
 -- @
 subOpt :: Option -> Text -> Text -> Text -> Text
 subOpt option patt replacement = snd . unsafePerformIO . subber where
-    subber = unsafePerformIO $ assembleSubber replacement option patt
+    subber = pureUserSubber option patt replacement
 
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
 -- a subject to each non-empty list of captures that pattern matches.
@@ -1233,7 +1233,7 @@ _captures = _capturesOpt mempty
 -- | @_capturesOpt mempty = _captures@
 _capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
 _capturesOpt option patt = _capturesInternal matcher getAllSlices where
-    matcher = unsafePerformIO $ assembleMatcher option patt
+    matcher = pureUserMatcher option patt
 
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
 -- a subject to the non-overlapping portions of it that match.
@@ -1244,9 +1244,8 @@ _match = _matchOpt mempty
 
 -- | @_matchOpt mempty = _match@
 _matchOpt :: Option -> Text -> Traversal' Text Text
-_matchOpt option patt = _cs . _Identity where
-    _cs = _capturesInternal matcher get0thSlice
-    matcher = unsafePerformIO $ assembleMatcher option patt
+_matchOpt option patt = _capturesInternal matcher get0thSlice . _Identity where
+    matcher = pureUserMatcher option patt
 
 -- * Support for Template Haskell compile-time regex analysis
 
