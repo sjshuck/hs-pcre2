@@ -146,7 +146,7 @@ _capturesTH patt _ = _cs . wrapped where
 --
 -- If there are no named captures, this simply acts as a guard.
 regex :: QuasiQuoter
-regex = QuasiQuoter {
+regex = QuasiQuoter{
     quoteExp = \s -> capturesInfoQ s >>= \case
         Nothing   -> [e| matchTH (Text.pack $(stringE s)) |]
         Just info -> [e| capturesTH
@@ -193,8 +193,8 @@ regex = QuasiQuoter {
 -- >
 -- > -- There are 15 competing standards
 _regex :: QuasiQuoter
-_regex = QuasiQuoter {
-    quoteExp  = \s -> capturesInfoQ s >>= \case
+_regex = QuasiQuoter{
+    quoteExp = \s -> capturesInfoQ s >>= \case
         Nothing   -> [e| _matchTH (Text.pack $(stringE s)) |]
         Just info -> [e| _capturesTH
             (Text.pack $(stringE s))

@@ -414,7 +414,7 @@ newlineToC NewlineNul     = pcre2_NEWLINE_NUL
 
 -- | Input for user-defined callouts.
 data CalloutInfo
-    = CalloutInfo {
+    = CalloutInfo{
         -- | The index of which callout point we\'re on.
         calloutIndex :: CalloutIndex,
         -- | The captures that have been set so far.
@@ -450,7 +450,7 @@ data CalloutResult
 
 -- | Input for user-defined substitution callouts.
 data SubCalloutInfo
-    = SubCalloutInfo {
+    = SubCalloutInfo{
         -- | The 1-based index of which substitution we\'re on.  Only goes past
         -- 1 during global substitutions.
         subCalloutSubsCount :: Int,
@@ -645,10 +645,10 @@ extractCompileEnv = do
 
             return eRef
 
-    return $ CompileEnv {..}
+    return CompileEnv{..}
 
 -- | Inputs to `Code` compilation besides the pattern.
-data CompileEnv = CompileEnv {
+data CompileEnv = CompileEnv{
     compileEnvCtx :: Maybe CompileContext,
     -- | A register for catching exceptions thrown in recursion guards, if
     -- needed.
@@ -656,7 +656,7 @@ data CompileEnv = CompileEnv {
 
 -- | Compile a `Code`.
 extractCode :: Text -> CompileEnv -> ExtractOpts Code
-extractCode patt (CompileEnv {..}) = do
+extractCode patt CompileEnv{..} = do
     opts <- bitOr <$> extractOptsOf _CompileOption
 
     liftIO $ mkForeignPtr pcre2_code_free $
@@ -684,7 +684,7 @@ extractCode patt (CompileEnv {..}) = do
 -- | `Code` and auxiliary compiled data used in preparation for a match or
 -- substitution.  This remains constant for the lifetime of a `Matcher` or
 -- `Subber`.
-data MatchEnv = MatchEnv {
+data MatchEnv = MatchEnv{
     matchEnvCode       :: Code,
     matchEnvOpts       :: CUInt,
     matchEnvCtx        :: Maybe MatchContext,
@@ -709,7 +709,7 @@ extractMatchEnv matchEnvCode = do
     matchEnvCallout <- safeLast <$> extractOptsOf _CalloutOption
     matchEnvSubCallout <- safeLast <$> extractOptsOf _SubCalloutOption
 
-    return $ MatchEnv {..}
+    return MatchEnv{..}
 
 -- | Generate, from user-supplied `Option`s and pattern, a `MatchEnv` that can
 -- be reused for matching or substituting.
@@ -725,11 +725,11 @@ userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
 
 -- | A `MatchEnv` is sufficient to fully implement a matching function.
 matcherWithEnv :: MatchEnv -> Matcher
-matcherWithEnv matchEnv@(MatchEnv {..}) subject = StreamEffect $
+matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $
     withForeignPtr matchEnvCode $ \codePtr ->
     withMatchDataFromCode codePtr $ \matchDataPtr ->
     Text.useAsPtr subject $ \subjPtr subjCUs -> do
-        MatchTempEnv {..} <- mkMatchTempEnv matchEnv subject
+        MatchTempEnv{..} <- mkMatchTempEnv matchEnv subject
 
         -- Loop over the subject, emitting match data until stopping.
         return $ fix1 0 $ \continue curOff -> do
@@ -791,7 +791,7 @@ pureUserMatcher option patt = matcherWithEnv matchEnv where
 -- along with their results, and replay the log the second time, returning those
 -- same results without re-incurring effects.
 subberWithEnv :: MatchEnv -> Text -> Subber
-subberWithEnv firstMatchEnv@(MatchEnv {..}) replacement subject =
+subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
     withForeignPtr matchEnvCode $ \codePtr ->
     Text.useAsPtr subject $ \subjPtr subjCUs ->
     Text.useAsPtr replacement $ \replPtr replCUs ->
@@ -822,7 +822,7 @@ subberWithEnv firstMatchEnv@(MatchEnv {..}) replacement subject =
             initOutLen = Text.length subject * 2
 
         poke outLenPtr $ fromIntegral initOutLen
-        MatchTempEnv {..} <- mkMatchTempEnv firstMatchEnv subject
+        MatchTempEnv{..} <- mkMatchTempEnv firstMatchEnv subject
         firstAttempt <- withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
             allocaArray initOutLen $ \outBufPtr -> do
                 result <- run pcre2_SUBSTITUTE_OVERFLOW_LENGTH ctxPtr outBufPtr
@@ -838,7 +838,7 @@ subberWithEnv firstMatchEnv@(MatchEnv {..}) replacement subject =
             Left subsLog          -> do
                 -- The output was bigger than we guessed.  Try again.
                 computedOutLen <- fromIntegral <$> peek outLenPtr
-                let finalMatchEnv = firstMatchEnv {
+                let finalMatchEnv = firstMatchEnv{
                         -- Do not run regular callouts again.
                         matchEnvCallout = Nothing,
                         -- Do not run any substitution callouts run previously.
@@ -847,7 +847,7 @@ subberWithEnv firstMatchEnv@(MatchEnv {..}) replacement subject =
                         case subsLog IM.!? subCalloutSubsCount info of
                             Just result -> return result
                             Nothing     -> f info
-                MatchTempEnv {..} <- mkMatchTempEnv finalMatchEnv subject
+                MatchTempEnv{..} <- mkMatchTempEnv finalMatchEnv subject
                 withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
                     allocaArray computedOutLen $ \outBufPtr -> do
                         result <- run 0 ctxPtr outBufPtr
@@ -869,10 +869,10 @@ mkMatchTempEnv
     :: MatchEnv
     -> Text -- ^ Callout info requires access to the original subject.
     -> IO MatchTempEnv
-mkMatchTempEnv (MatchEnv {..}) subject
+mkMatchTempEnv MatchEnv{..} subject
     | null matchEnvCallout && null matchEnvSubCallout = return noCallouts
     | otherwise                                       = do
-        calloutStateRef <- newIORef $ CalloutState {
+        calloutStateRef <- newIORef CalloutState{
             calloutStateException = Nothing,
             calloutStateSubsLog   = IM.empty}
         ctx <- mkForeignPtr pcre2_match_context_free ctxPtrForCallouts
@@ -896,7 +896,7 @@ mkMatchTempEnv (MatchEnv {..}) subject
                         CalloutNoMatchHere -> 1
                         CalloutNoMatch     -> pcre2_ERROR_NOMATCH
                     Left e -> do
-                        modifyIORef' calloutStateRef $ \cst -> cst {
+                        modifyIORef' calloutStateRef $ \cst -> cst{
                             calloutStateException = Just e}
                         return pcre2_ERROR_CALLOUT
             withForeignPtr ctx $ \ctxPtr ->
@@ -912,7 +912,7 @@ mkMatchTempEnv (MatchEnv {..}) subject
                     evaluate result
                 case resultOrE of
                     Right result -> do
-                        modifyIORef' calloutStateRef $ \cst -> cst {
+                        modifyIORef' calloutStateRef $ \cst -> cst{
                             calloutStateSubsLog = IM.insert
                                 (subCalloutSubsCount info)
                                 result
@@ -922,19 +922,19 @@ mkMatchTempEnv (MatchEnv {..}) subject
                             SubCalloutSkip   ->  1
                             SubCalloutAbort  -> -1
                     Left e -> do
-                        modifyIORef' calloutStateRef $ \cst -> cst {
+                        modifyIORef' calloutStateRef $ \cst -> cst{
                             calloutStateException = Just e}
                         return (-1)
             withForeignPtr ctx $ \ctxPtr -> do
                 result <- pcre2_set_substitute_callout ctxPtr funPtr nullPtr
                 check (== 0) result
 
-        return $ MatchTempEnv {
+        return MatchTempEnv{
             matchTempEnvCtx = Just ctx,
             matchTempEnvRef = Just calloutStateRef}
 
     where
-    noCallouts = MatchTempEnv {
+    noCallouts = MatchTempEnv{
         matchTempEnvCtx = matchEnvCtx,
         matchTempEnvRef = Nothing}
     ctxPtrForCallouts = case matchEnvCtx of
@@ -944,13 +944,13 @@ mkMatchTempEnv (MatchEnv {..}) subject
         Just ctx -> withForeignPtr ctx pcre2_match_context_copy
 
 -- | Per-call data for @pcre2_match()@ etc.
-data MatchTempEnv = MatchTempEnv {
+data MatchTempEnv = MatchTempEnv{
     matchTempEnvCtx :: Maybe MatchContext,
     matchTempEnvRef :: Maybe (IORef CalloutState)}
 
 -- | Data computed during callouts that will be stashed in an IORef and
 -- inspected after @pcre2_match()@ or similar completes.
-data CalloutState = CalloutState {
+data CalloutState = CalloutState{
     calloutStateException :: Maybe SomeException,
     calloutStateSubsLog   :: IntMap SubCalloutResult}
 
@@ -1009,7 +1009,7 @@ getCalloutInfo calloutSubject blockPtr = do
     let calloutIsFirst = flags .&. pcre2_CALLOUT_STARTMATCH /= 0
         calloutBacktracked = flags .&. pcre2_CALLOUT_BACKTRACK /= 0
 
-    return $ CalloutInfo {..}
+    return CalloutInfo{..}
 
 -- | Within a substitution callout, marshal the original subject and
 -- @pcre2_substitute_callout_block@ data to Haskell and present to the user
@@ -1039,7 +1039,7 @@ getSubCalloutInfo subCalloutSubject blockPtr = do
             (castCUs $ advancePtr outPtr $ fromIntegral start)
             (fromIntegral $ end - start)
 
-    return $ SubCalloutInfo {..}
+    return SubCalloutInfo{..}
 
 -- | If there was a callout and it threw an exception, rethrow it.
 maybeRethrow :: Maybe (IORef CalloutState) -> IO ()

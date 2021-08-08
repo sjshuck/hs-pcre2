@@ -1,6 +1,6 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -67,12 +67,11 @@ main = defaultMain [
             in capture @"bar" cs],
 
     bgroup "substitutions" [
-        bgroup "single" [
+        bgroup "single" $ let quux = Text.pack "quux" in [
             bench "PCRE2-native" $ flip nf textSubject $
-                sub (Text.pack "(?<=foo )bar(?= baz)") (Text.pack "quux"),
+                sub (Text.pack "(?<=foo )bar(?= baz)") quux,
 
-            let quux = Text.pack "quux"
-            in bench "lens-powered" $ flip nf textSubject $
+            bench "lens-powered" $ flip nf textSubject $
                 set ([_regex|foo (bar) baz|] . _capture @1) quux],
 
         let fruit = Text.pack "apples and bananas"
@@ -103,9 +102,7 @@ bgroupTexts label (patt, subj) = bgroup label [
     bench "regex-pcre-builtin" $ nfIO $ do
         Text.Regex.PCRE.Text.regexec regexBaseR textSubject >>= \case
             Right (Just (_, _, _, [bar])) -> return bar
-            x                             -> do
-                print x
-                error "BUG!",
+            x                             -> print x >> error "BUG!",
 
     bench "pcre-light" $ flip nf textSubject $ \subj ->
         let Just [_, bar] = Text.Regex.PCRE.Light.Char8.match
