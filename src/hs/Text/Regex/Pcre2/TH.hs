@@ -1,8 +1,14 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Text.Regex.Pcre2.TH where
 
@@ -15,13 +21,86 @@ import qualified Data.Map.Lazy              as Map
 import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
-import           GHC.TypeLits               (Nat, Symbol)
+import           Data.Type.Bool             (If, type (||))
+import           Data.Type.Equality         (type (==))
+import           GHC.TypeLits               hiding (Text)
+import qualified GHC.TypeLits               as TypeLits
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Quote
 import           Language.Haskell.TH.Syntax
 import           Lens.Micro
+import           Lens.Micro.Extras          (view)
 import           System.IO.Unsafe           (unsafePerformIO)
 import           Text.Regex.Pcre2.Internal
+
+-- | A wrapper around a list of captures that carries additional type-level
+-- information about the number and names of those captures.
+--
+-- This type is only intended to be created by `regex`\/`_regex` and consumed by
+-- `capture`\/`_capture`, relying on type inference.  Specifying the @info@
+-- explicitly in a type signature is not supported&#x2014;the definition of
+-- `CapturesInfo` is not part of the public API and may change without warning.
+--
+-- After obtaining `Captures` it\'s recommended to immediately consume them and
+-- transform them into application-level data, to avoid leaking the types to top
+-- level and having to write signatures.  In times of need, \"@Captures _@\" may
+-- be written with the help of @{-\# LANGUAGE PartialTypeSignatures \#-}@.
+newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
+
+-- | The kind of `Captures`\'s @info@.  The first number is the total number of
+-- parenthesized captures, and the list is a lookup table from capture names to
+-- numbers.
+type CapturesInfo = (Nat, [(Symbol, Nat)])
+
+-- | Helper for constructing an empty lookup table.  If we splice `promotedNilT`
+-- directly, we would have to require the user to turn on either
+-- @KindSignatures@ or @PolyKinds@; GHC seems to monokind @'[]@ as @[*]@,
+-- instead of unifying it with the list inside `CapturesInfo`.
+type NoNamedCaptures = '[] :: [(Symbol, Nat)]
+
+-- | Look up the number of a capture at compile time, either by number or by
+-- name.  Throw a helpful 'TypeError' if the index doesn\'t exist.
+type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
+    CaptNum (num :: Nat) '(hi, _) =
+        If (CmpNat num 0 == 'LT || CmpNat num hi == 'GT)
+            -- then
+            (TypeError (TypeLits.Text "No capture numbered " :<>: ShowType num))
+            -- else
+            num
+
+    CaptNum (name :: Symbol) '(_, '(name, num) ': _) = num
+    CaptNum (name :: Symbol) '(hi, _ ': kvs) = CaptNum name '(hi, kvs)
+    CaptNum (name :: Symbol) _ = TypeError
+        (TypeLits.Text "No capture named " :<>: ShowType name)
+
+    CaptNum _ _ = TypeError
+        (TypeLits.Text "Capture index must be a number (Nat) or name (Symbol)")
+
+-- | Safely lookup a capture in a `Captures` result obtained from a Template
+-- Haskell-generated matching function.
+--
+-- The ugly type signature may be interpreted like this:  /Given some capture/
+-- /group index @i@ and some @info@ about a regex, ensure that index exists and/
+-- /is resolved to the number @num@ at compile time.  Then, at runtime, get a/
+-- /capture group from a list of captures./
+--
+-- In practice the variable @i@ is specified by type application and the other
+-- variables are inferred.
+--
+-- > capture @3
+-- > capture @"bar"
+--
+-- Specifying a nonexistent number or name will result in a type error.
+capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
+    Captures info -> Text
+capture = view $ _capture @i
+
+-- | Like `capture` but focus from a `Captures` to a capture.
+_capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
+    Lens' (Captures info) Text
+_capture f (Captures cs) =
+    let (ls, c : rs) = NE.splitAt (fromInteger $ natVal @num Proxy) cs
+    in f c <&> \c' -> Captures $ NE.fromList $ ls ++ c' : rs
 
 -- | Unexported, top-level `IORef` that\'s created upon the first runtime
 -- evaluation of a Template Haskell `Matcher`.
@@ -46,12 +125,6 @@ predictCaptureNamesQ = runIO . predictCaptureNames mempty . Text.pack
 -- | Get the indexes of `Just` the named captures.
 toKVs :: [Maybe Text] -> [(Int, Text)]
 toKVs names = [(number, name) | (number, Just name) <- zip [1 ..] names]
-
--- | Helper for constructing an empty name-to-number lookup table.  If we splice
--- `promotedNilT` directly, we would have to require the user to turn on either
--- @KindSignatures@ or @PolyKinds@; GHC seems to monokind @'[]@ as @[*]@,
--- instead of unifying it with the list inside `CapturesInfo`.
-type NoNamedCaptures = '[] :: [(Symbol, Nat)]
 
 -- | Generate the data-kinded phantom type parameter of `Captures` of a pattern,
 -- if needed.

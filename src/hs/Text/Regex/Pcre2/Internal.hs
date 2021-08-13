@@ -1,22 +1,15 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
 
 module Text.Regex.Pcre2.Internal where
 
 import           Control.Applicative        (Alternative(..))
-import           Control.Exception          hiding (TypeError)
+import           Control.Exception
 import           Control.Monad.State.Strict
 import           Data.Either                (partitionEithers)
 import           Data.Foldable              (toList)
@@ -32,15 +25,11 @@ import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
 import qualified Data.Text.Foreign          as Text
-import           Data.Type.Bool             (If, type (||))
-import           Data.Type.Equality         (type (==))
 import           Data.Typeable              (cast)
 import           Data.Void                  (Void, absurd)
 import           Foreign
 import           Foreign.C.Types
 import qualified Foreign.Concurrent         as Conc
-import           GHC.TypeLits               hiding (Text)
-import qualified GHC.TypeLits               as TypeLits
 import           Lens.Micro
 import           Lens.Micro.Extras          (preview, view)
 import           System.IO.Unsafe           (unsafePerformIO)
@@ -1184,8 +1173,7 @@ subOpt option patt replacement = snd . unsafePerformIO . subber where
 -- If the list becomes longer for some reason, the extra elements are ignored.
 -- If it\'s shortened, the absent elements are considered to be unchanged.
 --
--- It's recommended that the list be modified capture-wise,
--- using [@ix@](https://hackage.haskell.org/package/microlens/docs/Lens-Micro.html#v:ix).
+-- It's recommended that the list be modified capture-wise, using `ix`.
 --
 -- > let madlibs = _captures "(\\w+) my (\\w+)"
 -- >
@@ -1256,69 +1244,6 @@ getCodeInfo :: (Storable a) => Ptr Pcre2_code -> CUInt -> IO a
 getCodeInfo codePtr what = alloca $ \wherePtr -> do
     pcre2_pattern_info codePtr what wherePtr >>= check (== 0)
     peek wherePtr
-
--- | A wrapper around a list of captures that carries additional type-level
--- information about the number and names of those captures.
---
--- This type is only intended to be created by
--- `Text.Regex.Pcre2.regex`\/`Text.Regex.Pcre2._regex` and consumed by
--- `Text.Regex.Pcre2.capture`\/`Text.Regex.Pcre2._capture`, relying on type
--- inference.  Specifying the @info@ explicitly in a type signature is not
--- supported&#x2014;the definition of `CapturesInfo` is not part of the public
--- API and may change without warning.
---
--- After obtaining `Captures` it\'s recommended to immediately consume them and
--- transform them into application-level data, to avoid leaking the types to top
--- level and having to write signatures.  In times of need, \"@Captures _@\" may
--- be written with the help of @{-\# LANGUAGE PartialTypeSignatures \#-}@.
-newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
-
--- | The kind of `Captures`\'s @info@.
-type CapturesInfo = (Nat, [(Symbol, Nat)])
-
--- | Look up the number of a capture at compile time, either by number or by
--- name.  Throw a helpful 'TypeError' if the index doesn\'t exist.
-type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
-    CaptNum (num :: Nat) '(hi, _) =
-        If (CmpNat num 0 == 'LT || CmpNat num hi == 'GT)
-            -- then
-            (TypeError (TypeLits.Text "No capture numbered " :<>: ShowType num))
-            -- else
-            num
-
-    CaptNum (name :: Symbol) '(_, '(name, num) ': _) = num
-    CaptNum (name :: Symbol) '(hi, _ ': kvs) = CaptNum name '(hi, kvs)
-    CaptNum (name :: Symbol) _ = TypeError
-        (TypeLits.Text "No capture named " :<>: ShowType name)
-
-    CaptNum _ _ = TypeError
-        (TypeLits.Text "Capture index must be a number (Nat) or name (Symbol)")
-
--- | Safely lookup a capture in a `Captures` result obtained from a Template
--- Haskell-generated matching function.
---
--- The ugly type signature may be interpreted like this:  /Given some capture/
--- /group index @i@ and some @info@ about a regex, ensure that index exists and/
--- /is resolved to the number @num@ at compile time.  Then, at runtime, get a/
--- /capture group from a list of captures./
---
--- In practice the variable @i@ is specified by type application and the other
--- variables are inferred.
---
--- > capture @3
--- > capture @"bar"
---
--- Specifying a nonexistent number or name will result in a type error.
-capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
-    Captures info -> Text
-capture = view $ _capture @i
-
--- | Like `capture` but focus from a `Captures` to a capture.
-_capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
-    Lens' (Captures info) Text
-_capture f (Captures cs) =
-    let (ls, c : rs) = NE.splitAt (fromInteger $ natVal @num Proxy) cs
-    in f c <&> \c' -> Captures $ NE.fromList $ ls ++ c' : rs
 
 -- * Exceptions
 
