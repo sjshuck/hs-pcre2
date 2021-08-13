@@ -680,10 +680,7 @@ userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
     (matchEnv, []) -> matchEnv
     _              -> error "BUG! Options not fully extracted"
     where
-    extractAll = do
-        compileEnv <- extractCompileEnv
-        code <- extractCode patt compileEnv
-        extractMatchEnv code
+    extractAll = extractCompileEnv >>= extractCode patt >>= extractMatchEnv
 
 -- | A `MatchEnv` is sufficient to fully implement a matching function.
 matcherWithEnv :: MatchEnv -> Matcher
@@ -834,7 +831,7 @@ mkMatchTempEnv
 mkMatchTempEnv MatchEnv{..} subject
     | null matchEnvCallout && null matchEnvSubCallout = return noCallouts
     | otherwise                                       = do
-        calloutStateRef <- newIORef CalloutState{
+        stateRef <- newIORef CalloutState{
             calloutStateException = Nothing,
             calloutStateSubsLog   = IM.empty}
         ctx <- mkForeignPtr pcre2_match_context_free ctxPtrForCallouts
@@ -855,8 +852,7 @@ mkMatchTempEnv MatchEnv{..} subject
                         CalloutNoMatchHere -> 1
                         CalloutNoMatch     -> pcre2_ERROR_NOMATCH
                     Left e -> do
-                        modifyIORef' calloutStateRef $
-                            _calloutStateException ?~ e
+                        modifyIORef' stateRef $ _calloutStateException ?~ e
                         return pcre2_ERROR_CALLOUT
             withForeignPtr ctx $ \ctxPtr ->
                 pcre2_set_callout ctxPtr funPtr nullPtr >>= check (== 0)
@@ -868,15 +864,14 @@ mkMatchTempEnv MatchEnv{..} subject
                 resultOrE <- try $ f info >>= evaluate
                 case resultOrE of
                     Right result -> do
-                        modifyIORef' calloutStateRef $ _calloutStateSubsLog %~
+                        modifyIORef' stateRef $ over _calloutStateSubsLog $
                             IM.insert (subCalloutSubsCount info) result
                         return $ case result of
                             SubCalloutAccept ->  0
                             SubCalloutSkip   ->  1
                             SubCalloutAbort  -> -1
                     Left e -> do
-                        modifyIORef' calloutStateRef $
-                            _calloutStateException ?~ e
+                        modifyIORef' stateRef $ _calloutStateException ?~ e
                         return (-1)
             withForeignPtr ctx $ \ctxPtr -> do
                 result <- pcre2_set_substitute_callout ctxPtr funPtr nullPtr
@@ -884,7 +879,7 @@ mkMatchTempEnv MatchEnv{..} subject
 
         return MatchTempEnv{
             matchTempEnvCtx = Just ctx,
-            matchTempEnvRef = Just calloutStateRef}
+            matchTempEnvRef = Just stateRef}
 
     where
     noCallouts = MatchTempEnv{
