@@ -7,7 +7,6 @@
 module Text.Regex.Pcre2.TH where
 
 import           Control.Applicative        (Alternative(..))
-import           Data.Functor               ((<&>))
 import           Data.IORef
 import           Data.List.NonEmpty         (NonEmpty(..))
 import qualified Data.List.NonEmpty         as NE
@@ -20,6 +19,7 @@ import           GHC.TypeLits               (Nat, Symbol)
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Quote
 import           Language.Haskell.TH.Syntax
+import           Lens.Micro
 import           System.IO.Unsafe           (unsafePerformIO)
 import           Text.Regex.Pcre2.Internal
 
@@ -110,7 +110,9 @@ _capturesTH patt _ = _cs . wrapped where
 
 -- | === As an expression
 --
--- > regex :: (Alternative f) => String -> Text -> f (Captures info)
+-- @
+-- regex :: (`Alternative` f) => String -> Text -> f (`Captures` info)
+-- @
 --
 -- in the presence of parenthesized captures, or
 --
@@ -179,8 +181,10 @@ regex = QuasiQuoter{
 
 -- | An optical variant of `regex`.  Can only be used as an expression.
 --
--- > _regex :: String -> Traversal' Text (Captures info)
--- > _regex :: String -> Traversal' Text Text
+-- @
+-- _regex :: String -> `Traversal'` Text (`Captures` info)
+-- _regex :: String -> Traversal' Text Text
+-- @
 --
 -- > import Control.Lens
 -- > import Data.Text.Lens

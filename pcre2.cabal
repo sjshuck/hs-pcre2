@@ -144,6 +144,7 @@ library
   build-depends:
       base >=4.9 && <5
     , containers
+    , microlens
     , mtl
     , template-haskell
     , text
@@ -161,6 +162,7 @@ test-suite pcre2-test
       base >=4.9 && <5
     , containers
     , hspec
+    , microlens
     , microlens-platform
     , mtl
     , pcre2
@@ -180,6 +182,7 @@ benchmark pcre2-benchmarks
       base >=4.9 && <5
     , containers
     , criterion
+    , microlens
     , microlens-platform
     , mtl
     , pcre-light

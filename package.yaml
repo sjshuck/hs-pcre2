@@ -24,6 +24,7 @@ description:         Please see the README on GitHub at <https://github.com/sjsh
 dependencies:
 - base >= 4.9 && < 5
 - containers
+- microlens
 - mtl
 - template-haskell
 - text

@@ -20,17 +20,14 @@ import           Control.Exception          hiding (TypeError)
 import           Control.Monad.State.Strict
 import           Data.Either                (partitionEithers)
 import           Data.Foldable              (toList)
-import           Data.Function              ((&))
-import           Data.Functor               ((<&>))
-import           Data.Functor.Const         (Const(..))
 import           Data.Functor.Identity      (Identity(..))
 import           Data.IORef
-import           Data.IntMap.Strict         (IntMap)
+import           Data.IntMap.Strict         (IntMap, (!?))
 import qualified Data.IntMap.Strict         as IM
 import           Data.List                  (foldl', intercalate)
 import           Data.List.NonEmpty         (NonEmpty(..))
 import qualified Data.List.NonEmpty         as NE
-import           Data.Monoid                (Alt(..), Any(..), Endo(..))
+import           Data.Monoid                (Alt(..), First)
 import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
@@ -44,6 +41,8 @@ import           Foreign.C.Types
 import qualified Foreign.Concurrent         as Conc
 import           GHC.TypeLits               hiding (Text)
 import qualified GHC.TypeLits               as TypeLits
+import           Lens.Micro
+import           Lens.Micro.Extras          (preview, view)
 import           System.IO.Unsafe           (unsafePerformIO)
 import           Text.Regex.Pcre2.Foreign
 
@@ -66,10 +65,6 @@ mkFunPtr anchor create = do
     funPtr <- create
     Conc.addForeignPtrFinalizer anchor $ freeHaskellFunPtr funPtr
     return funPtr
-
-safeLast :: [a] -> Maybe a
-safeLast [] = Nothing
-safeLast xs = Just $ last xs
 
 bitOr :: (Foldable t, Bits a) => t a -> a
 bitOr = foldl' (.|.) zeroBits
@@ -126,28 +121,9 @@ class CastCUs a b | a -> b where
 instance CastCUs CUShort Word16
 instance CastCUs Word16 CUShort
 
--- ** Lens types and utilities
+-- ** Lens utilities
 
-type Lens'      s a = forall f. (Functor f)     => (a -> f a) -> s -> f s
-type Traversal' s a = forall f. (Applicative f) => (a -> f a) -> s -> f s
-
-type Getting r s a = (a -> Const r a) -> s -> Const r s
-
-preview :: Getting (Alt Maybe a) s a -> s -> Maybe a
-preview = toAlternativeOf
-
-view :: Getting a s a -> s -> a
-view l = getConst . l Const
-
-to :: (s -> a) -> forall r. Getting r s a
-to k f = Const . getConst . f . k
-
-has :: Getting Any s a -> s -> Bool
-has l = getAny . getConst . l (\_ -> Const $ Any True)
-
-toListOf :: Getting (Endo [a]) s a -> s -> [a]
-toListOf l x = let build = Endo . (:) in view (l . to build) x `appEndo` []
-
+-- | A more general `toListOf` that collects targets into any `Alternative`.
 toAlternativeOf :: (Alternative f) => Getting (Alt f a) s a -> s -> f a
 toAlternativeOf l = let alt = Alt . pure in getAlt . view (l . to alt)
 
@@ -338,7 +314,7 @@ data Option
     | Ungreedy -- ^ Invert the effect of @?@.  Without it, quantifiers are
     -- non-greedy; with it, they are greedy.  Equivalent to @(?U)@.
 
-    | UnsafeCompileRecGuard (Int -> IO Bool) -- ^ Run the given guard on every
+    | UnsafeCompileRecGuard !(Int -> IO Bool) -- ^ Run the given guard on every
     -- new descent into a level of parentheses, passing the current depth as
     -- argument.  Returning @False@ aborts pattern compilation with an
     -- exception.  Multiples of this option before the rightmost are ignored.
@@ -347,13 +323,13 @@ data Option
     -- /two passes, both times triggering the recursion guard.  Also, it is/
     -- /triggered at the beginning of the pattern, passing 0.  None of this is/
     -- /documented; expect the unexpected in the presence of side effects!/
-    | UnsafeCallout (CalloutInfo -> IO CalloutResult) -- ^ Run the given callout
-    -- at every callout point
+    | UnsafeCallout !(CalloutInfo -> IO CalloutResult) -- ^ Run the given
+    -- callout at every callout point
     -- (see [the docs](https://pcre.org/current/doc/html/pcre2callout.html) for
     -- more info).  Multiples of this option before the rightmost are ignored.
     | AutoCallout -- ^ Run callout for every pattern item.  Only relevant if a
     -- callout is set.
-    | UnsafeSubCallout (SubCalloutInfo -> IO SubCalloutResult) -- ^ Run the
+    | UnsafeSubCallout !(SubCalloutInfo -> IO SubCalloutResult) -- ^ Run the
     -- given callout on every substitution.  This is at most once unless
     -- `SubGlobal` is set.  Multiples of this option before the rightmost are
     -- ignored.
@@ -602,16 +578,16 @@ _MatchContextOption f =
 type ExtractOpts = StateT [AppliedOption] IO
 
 -- | Use a fake @Prism'@ to extract a category of options.
-extractOptsOf :: Getting (Alt Maybe a) AppliedOption a -> ExtractOpts [a]
+extractOptsOf :: Getting (First a) AppliedOption a -> ExtractOpts [a]
 extractOptsOf prism = state $ partitionEithers . map discrim where
-    discrim opt = maybe (Right opt) Left $ preview prism opt
+    discrim opt = maybe (Right opt) Left $ opt ^? prism
 
 -- | Prepare to compile a `Code`.
 extractCompileEnv :: ExtractOpts CompileEnv
 extractCompileEnv = do
     ctxUpds <- extractOptsOf _CompileContextOption
     xtraOpts <- bitOr <$> extractOptsOf _CompileExtraOption
-    recGuard <- safeLast <$> extractOptsOf _CompileRecGuardOption
+    recGuard <- preview _last <$> extractOptsOf _CompileRecGuardOption
 
     compileEnvCtx <- sequence $ do
         guard $ not $ null ctxUpds && xtraOpts == 0 && null recGuard
@@ -631,10 +607,7 @@ extractCompileEnv = do
         Just $ liftIO $ do
             eRef <- newIORef Nothing
             funPtr <- mkFunPtr ctx $ mkRecursionGuard $ \depth _ -> do
-                resultOrE <- try $ do
-                    f <- evaluate f
-                    result <- f $ fromIntegral depth
-                    evaluate result
+                resultOrE <- try $ f (fromIntegral depth) >>= evaluate
                 case resultOrE of
                     Right success -> return $ if success then 0 else 1
                     Left e        -> writeIORef eRef (Just e) >> return 1
@@ -673,7 +646,7 @@ extractCode patt CompileEnv{..} = do
                 ctxPtr
             when (codePtr == nullPtr) $ do
                 -- Re-throw exception (if any) from recursion guard (if any)
-                forM_ compileEnvERef $ readIORef >=> mapM_ throwIO
+                forOf_ _Just compileEnvERef $ readIORef >=> mapM_ throwIO
                 -- Otherwise throw PCRE2 error
                 errorCode <- peek errorCodePtr
                 offCUs <- peek errorOffPtr
@@ -706,8 +679,8 @@ extractMatchEnv matchEnvCode = do
 
             return ctx
 
-    matchEnvCallout <- safeLast <$> extractOptsOf _CalloutOption
-    matchEnvSubCallout <- safeLast <$> extractOptsOf _SubCalloutOption
+    matchEnvCallout <- preview _last <$> extractOptsOf _CalloutOption
+    matchEnvSubCallout <- preview _last <$> extractOptsOf _SubCalloutOption
 
     return MatchEnv{..}
 
@@ -844,7 +817,7 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
                         -- Do not run any substitution callouts run previously.
                         matchEnvSubCallout = fastFwd <$> matchEnvSubCallout}
                     fastFwd f = \info ->
-                        case subsLog IM.!? subCalloutSubsCount info of
+                        case subsLog !? subCalloutSubsCount info of
                             Just result -> return result
                             Nothing     -> f info
                 MatchTempEnv{..} <- mkMatchTempEnv finalMatchEnv subject
@@ -883,47 +856,38 @@ mkMatchTempEnv MatchEnv{..} subject
         -- saving them.
 
         -- Install callout, if any
-        forM_ matchEnvCallout $ \f -> do
+        forOf_ _Just matchEnvCallout $ \f -> do
             funPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
                 info <- getCalloutInfo subject blockPtr
-                resultOrE <- try $ do
-                    f <- evaluate f
-                    result <- f info
-                    evaluate result
+                resultOrE <- try $ f info >>= evaluate
                 case resultOrE of
                     Right result -> return $ case result of
                         CalloutProceed     -> 0
                         CalloutNoMatchHere -> 1
                         CalloutNoMatch     -> pcre2_ERROR_NOMATCH
                     Left e -> do
-                        modifyIORef' calloutStateRef $ \cst -> cst{
-                            calloutStateException = Just e}
+                        modifyIORef' calloutStateRef $
+                            _calloutStateException ?~ e
                         return pcre2_ERROR_CALLOUT
             withForeignPtr ctx $ \ctxPtr ->
                 pcre2_set_callout ctxPtr funPtr nullPtr >>= check (== 0)
 
         -- Install substitution callout, if any
-        forM_ matchEnvSubCallout $ \f -> do
+        forOf_ _Just matchEnvSubCallout $ \f -> do
             funPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
                 info <- getSubCalloutInfo subject blockPtr
-                resultOrE <- try $ do
-                    f <- evaluate f
-                    result <- f info
-                    evaluate result
+                resultOrE <- try $ f info >>= evaluate
                 case resultOrE of
                     Right result -> do
-                        modifyIORef' calloutStateRef $ \cst -> cst{
-                            calloutStateSubsLog = IM.insert
-                                (subCalloutSubsCount info)
-                                result
-                                (calloutStateSubsLog cst)}
+                        modifyIORef' calloutStateRef $ _calloutStateSubsLog %~
+                            IM.insert (subCalloutSubsCount info) result
                         return $ case result of
                             SubCalloutAccept ->  0
                             SubCalloutSkip   ->  1
                             SubCalloutAbort  -> -1
                     Left e -> do
-                        modifyIORef' calloutStateRef $ \cst -> cst{
-                            calloutStateException = Just e}
+                        modifyIORef' calloutStateRef $
+                            _calloutStateException ?~ e
                         return (-1)
             withForeignPtr ctx $ \ctxPtr -> do
                 result <- pcre2_set_substitute_callout ctxPtr funPtr nullPtr
@@ -953,6 +917,11 @@ data MatchTempEnv = MatchTempEnv{
 data CalloutState = CalloutState{
     calloutStateException :: Maybe SomeException,
     calloutStateSubsLog   :: IntMap SubCalloutResult}
+
+_calloutStateException f CalloutState{..} = f calloutStateException
+    <&> \calloutStateException -> CalloutState{..}
+_calloutStateSubsLog f CalloutState{..} = f calloutStateSubsLog
+    <&> \calloutStateSubsLog -> CalloutState{..}
 
 foreign import ccall "wrapper" mkRecursionGuard :: FfiWrapper
     (CUInt -> Ptr a -> IO CInt)
@@ -985,7 +954,7 @@ getCalloutInfo calloutSubject blockPtr = do
         ovecPtr <- pcre2_callout_block_offset_vector blockPtr
         top <- pcre2_callout_block_capture_top blockPtr
         forM (0 :| [1 .. fromIntegral top - 1]) $ \n -> do
-            [start, end] <- forM [0, 1] $ peekElemOff ovecPtr . (n * 2 +)
+            [start, end] <- forM [0, 1] $ \i -> peekElemOff ovecPtr $ n * 2 + i
             return $ if start == pcre2_UNSET
                 then Nothing
                 else Just $ smartSlice calloutSubject $ Slice
@@ -1024,7 +993,7 @@ getSubCalloutInfo subCalloutSubject blockPtr = do
         ovecPtr <- pcre2_substitute_callout_block_ovector blockPtr
         ovecCount <- pcre2_substitute_callout_block_oveccount blockPtr
         forM (0 :| [1 .. fromIntegral ovecCount - 1]) $ \n -> do
-            [start, end] <- forM [0, 1] $ peekElemOff ovecPtr . (n * 2 +)
+            [start, end] <- forM [0, 1] $ \i -> peekElemOff ovecPtr $ n * 2 + i
             return $ if start == pcre2_UNSET
                 then Nothing
                 else Just $ smartSlice subCalloutSubject $ Slice
@@ -1280,7 +1249,7 @@ getCaptureNames codePtr = do
 
     hiCaptNum <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
 
-    return $ map (names IM.!?) [1 .. fromIntegral hiCaptNum]
+    return $ map (names !?) [1 .. fromIntegral hiCaptNum]
 
 -- | Low-level access to compiled pattern info, per the docs.
 getCodeInfo :: (Storable a) => Ptr Pcre2_code -> CUInt -> IO a
