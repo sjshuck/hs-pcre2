@@ -758,13 +758,8 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
     Text.useAsPtr subject $ \subjPtr subjCUs ->
     Text.useAsPtr replacement $ \replPtr replCUs ->
     alloca $ \outLenPtr -> do
-        let checkAndGetOutput :: CInt -> PCRE2_SPTR -> IO (CInt, Text)
-            checkAndGetOutput 0      _         = return (0, subject)
-            checkAndGetOutput result outBufPtr = do
-                check (> 0) result
-                outLen <- peek outLenPtr
-                out <- Text.fromPtr (castCUs outBufPtr) (fromIntegral outLen)
-                return (result, out)
+        let -- Guess the size of the output to be <= 2x that of the subject.
+            initOutLen = Text.length subject * 2
 
             run :: CUInt -> Ptr Pcre2_match_context -> PCRE2_SPTR -> IO CInt
             run curOpts ctxPtr outBufPtr = pcre2_substitute
@@ -780,8 +775,13 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
                 outBufPtr
                 outLenPtr
 
-            -- Guess the size of the output to be <= 2x that of the subject.
-            initOutLen = Text.length subject * 2
+            checkAndGetOutput :: CInt -> PCRE2_SPTR -> IO (CInt, Text)
+            checkAndGetOutput 0      _         = return (0, subject)
+            checkAndGetOutput result outBufPtr = do
+                check (> 0) result
+                outLen <- peek outLenPtr
+                out <- Text.fromPtr (castCUs outBufPtr) (fromIntegral outLen)
+                return (result, out)
 
         poke outLenPtr $ fromIntegral initOutLen
         MatchTempEnv{..} <- mkMatchTempEnv firstMatchEnv subject
