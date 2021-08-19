@@ -303,7 +303,7 @@ data Option
     | Ungreedy -- ^ Invert the effect of @?@.  Without it, quantifiers are
     -- non-greedy; with it, they are greedy.  Equivalent to @(?U)@.
 
-    | UnsafeCompileRecGuard !(Int -> IO Bool) -- ^ Run the given guard on every
+    | UnsafeCompileRecGuard (Int -> IO Bool) -- ^ Run the given guard on every
     -- new descent into a level of parentheses, passing the current depth as
     -- argument.  Returning @False@ aborts pattern compilation with an
     -- exception.  Multiples of this option before the rightmost are ignored.
@@ -312,13 +312,13 @@ data Option
     -- /two passes, both times triggering the recursion guard.  Also, it is/
     -- /triggered at the beginning of the pattern, passing 0.  None of this is/
     -- /documented; expect the unexpected in the presence of side effects!/
-    | UnsafeCallout !(CalloutInfo -> IO CalloutResult) -- ^ Run the given
-    -- callout at every callout point
-    -- (see [the docs](https://pcre.org/current/doc/html/pcre2callout.html) for
-    -- more info).  Multiples of this option before the rightmost are ignored.
+    | UnsafeCallout (CalloutInfo -> IO CalloutResult) -- ^ Run the given callout
+    -- at every callout point (see
+    -- [the docs](https://pcre.org/current/doc/html/pcre2callout.html) for more
+    -- info).  Multiples of this option before the rightmost are ignored.
     | AutoCallout -- ^ Run callout for every pattern item.  Only relevant if a
     -- callout is set.
-    | UnsafeSubCallout !(SubCalloutInfo -> IO SubCalloutResult) -- ^ Run the
+    | UnsafeSubCallout (SubCalloutInfo -> IO SubCalloutResult) -- ^ Run the
     -- given callout on every substitution.  This is at most once unless
     -- `SubGlobal` is set.  Multiples of this option before the rightmost are
     -- ignored.
@@ -531,14 +531,14 @@ applyOption = \case
 -- | Intermediate representation of options expressing what effect they\'ll have
 -- on which stage of regex compilation\/execution.  Also provide fake @Prism'@s.
 data AppliedOption
-    = CompileOption CUInt
-    | CompileExtraOption CUInt
-    | CompileContextOption (CompileContext -> IO ())
-    | CompileRecGuardOption (Int -> IO Bool)
-    | MatchOption CUInt
-    | CalloutOption (CalloutInfo -> IO CalloutResult)
-    | SubCalloutOption (SubCalloutInfo -> IO SubCalloutResult)
-    | MatchContextOption (MatchContext -> IO ())
+    = CompileOption !CUInt
+    | CompileExtraOption !CUInt
+    | CompileContextOption !(CompileContext -> IO ())
+    | CompileRecGuardOption !(Int -> IO Bool)
+    | MatchOption !CUInt
+    | CalloutOption !(CalloutInfo -> IO CalloutResult)
+    | SubCalloutOption !(SubCalloutInfo -> IO SubCalloutResult)
+    | MatchContextOption !(MatchContext -> IO ())
 
 _CompileOption f =
     \case CompileOption x -> CompileOption <$> f x; o -> pure o
@@ -611,10 +611,10 @@ extractCompileEnv = do
 
 -- | Inputs to `Code` compilation besides the pattern.
 data CompileEnv = CompileEnv{
-    compileEnvCtx :: Maybe CompileContext,
+    compileEnvCtx :: !(Maybe CompileContext),
     -- | A register for catching exceptions thrown in recursion guards, if
     -- needed.
-    compileEnvERef :: Maybe (IORef (Maybe SomeException))}
+    compileEnvERef :: !(Maybe (IORef (Maybe SomeException)))}
 
 -- | Compile a `Code`.
 extractCode :: Text -> CompileEnv -> ExtractOpts Code
@@ -893,19 +893,19 @@ mkMatchTempEnv MatchEnv{..} subject
 
 -- | Per-call data for @pcre2_match()@ etc.
 data MatchTempEnv = MatchTempEnv{
-    matchTempEnvCtx :: Maybe MatchContext,
-    matchTempEnvRef :: Maybe (IORef CalloutState)}
+    matchTempEnvCtx :: !(Maybe MatchContext),
+    matchTempEnvRef :: !(Maybe (IORef CalloutState))}
 
 -- | Data computed during callouts that will be stashed in an IORef and
--- inspected after @pcre2_match()@ or similar completes.
+-- inspected after @pcre2_match()@ or similar completes.  `Lens'`s included.
 data CalloutState = CalloutState{
-    calloutStateException :: Maybe SomeException,
-    calloutStateSubsLog   :: IntMap SubCalloutResult}
+    calloutStateException :: !(Maybe SomeException),
+    calloutStateSubsLog   :: !(IntMap SubCalloutResult)}
 
-_calloutStateException f CalloutState{..} = f calloutStateException
-    <&> \calloutStateException -> CalloutState{..}
-_calloutStateSubsLog f CalloutState{..} = f calloutStateSubsLog
-    <&> \calloutStateSubsLog -> CalloutState{..}
+_calloutStateException f CalloutState{..} =
+    f calloutStateException <&> \calloutStateException -> CalloutState{..}
+_calloutStateSubsLog f CalloutState{..} =
+    f calloutStateSubsLog <&> \calloutStateSubsLog -> CalloutState{..}
 
 foreign import ccall "wrapper" mkRecursionGuard :: FfiWrapper
     (CUInt -> Ptr a -> IO CInt)
@@ -1243,7 +1243,7 @@ getCodeInfo codePtr what = alloca $ \wherePtr -> do
 -- * Exceptions
 
 -- | The root of the PCRE2 exception hierarchy.
-data SomePcre2Exception = forall e. (Exception e) => SomePcre2Exception e
+data SomePcre2Exception = forall e. (Exception e) => SomePcre2Exception !e
 instance Show SomePcre2Exception where
     show (SomePcre2Exception e) = show e
 instance Exception SomePcre2Exception
