@@ -1,5 +1,10 @@
 # Changelog and Acknowledgements
 
+## 2.0.1
+* Added `microlens` as a dependency to improve Haddock docs (`Traversal'` _et
+  al_ are clickable) and relieve maintenance burden somewhat.
+* Moderate refactoring of internals.
+
 ## 2.0.0
 This release introduces significant breaking changes in order to make the API
 smaller, more consistent, and safer.
