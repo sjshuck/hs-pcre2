@@ -86,7 +86,8 @@ data Slice = Slice
     {-# UNPACK #-} !Text.I16
 
 -- | Zero-copy slice a 'Text'.  An unset capture is represented by a
--- `pcre2_UNSET` range and is interpreted in this library as `Text.empty`.
+-- `pcre2_UNSET` range and is interpreted in this library as `Text.empty`.  Note
+-- this is a lazy, pure operation.
 thinSlice :: Text -> Slice -> Text
 thinSlice text (Slice off offEnd)
     | off == fromIntegral pcre2_UNSET = Text.empty
@@ -94,13 +95,21 @@ thinSlice text (Slice off offEnd)
         & Text.takeWord16 offEnd
         & Text.dropWord16 off
 
--- | Slice a 'Text', copying if it\'s less than half of the original.
+-- | Slice a 'Text', copying if it\'s less than half of the original.  Note this
+-- is a lazy, pure operation.
 smartSlice :: Text -> Slice -> Text
 smartSlice text slice =
     let substring = thinSlice text slice
     in if Text.length substring > Text.length text `div` 2
         then substring
         else Text.copy substring
+
+-- | Like `smartSlice`, but only produce a result when not `pcre2_UNSET`.  It is
+-- forced when the outer `Maybe` constructor is forced.
+maybeSmartSlice :: Text -> Slice -> Maybe Text
+maybeSmartSlice text slice@(Slice start _)
+    | start == fromIntegral pcre2_UNSET = Nothing
+    | otherwise                         = Just $! smartSlice text slice
 
 -- | Probably unnecessary, but unrestricted 'castPtr' feels dangerous.
 class CastCUs a b | a -> b where
@@ -816,8 +825,8 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
 -- | Helper to generate substitution function.  For consistency with
 -- `pureUserMatcher`.
 pureUserSubber :: Option -> Text -> Text -> Subber
-pureUserSubber option patt =
-    subberWithEnv $ unsafePerformIO $ userMatchEnv option patt
+pureUserSubber option patt = subberWithEnv matchEnv where
+    matchEnv = unsafePerformIO $ userMatchEnv option patt
 
 -- | Generate per-call data for @pcre2_match()@ etc., to accommodate callouts.
 --
@@ -939,11 +948,9 @@ getCalloutInfo calloutSubject blockPtr = do
         top <- pcre2_callout_block_capture_top blockPtr
         forM (0 :| [1 .. fromIntegral top - 1]) $ \n -> do
             [start, end] <- forM [0, 1] $ \i -> peekElemOff ovecPtr $ n * 2 + i
-            return $ if start == pcre2_UNSET
-                then Nothing
-                else Just $ smartSlice calloutSubject $ Slice
-                    (fromIntegral start)
-                    (fromIntegral end)
+            evaluate $ maybeSmartSlice calloutSubject $ Slice
+                (fromIntegral start)
+                (fromIntegral end)
 
     calloutMark <- do
         ptr <- pcre2_callout_block_mark blockPtr
@@ -978,11 +985,9 @@ getSubCalloutInfo subCalloutSubject blockPtr = do
         ovecCount <- pcre2_substitute_callout_block_oveccount blockPtr
         forM (0 :| [1 .. fromIntegral ovecCount - 1]) $ \n -> do
             [start, end] <- forM [0, 1] $ \i -> peekElemOff ovecPtr $ n * 2 + i
-            return $ if start == pcre2_UNSET
-                then Nothing
-                else Just $ smartSlice subCalloutSubject $ Slice
-                    (fromIntegral start)
-                    (fromIntegral end)
+            evaluate $ maybeSmartSlice subCalloutSubject $ Slice
+                (fromIntegral start)
+                (fromIntegral end)
 
     subCalloutReplacement <- do
         outPtr <- pcre2_substitute_callout_block_output blockPtr
@@ -1008,17 +1013,20 @@ _capturesInternal matcher fromMatch f subject =
     traverse f captureTs <&> \captureTs' ->
         -- Swag foldl-as-foldr to create only as many segments as we need to
         -- stitch back together and no more.
-        let triples = concat $ zipWith3 zip3
-                (map toList sliceTs)
-                (map toList captureTs)
-                (map toList captureTs')
-        in Text.concat $ foldr mkSegments termSegments triples 0
+        let beforeAndAfter = zip
+                (concatMap toList sliceAndCaptureTs)
+                (concatMap toList captureTs')
+        in Text.concat $ foldr mkSegments termSegments beforeAndAfter 0
 
     where
-    sliceTs = unsafeLazyStreamToList $ mapMS fromMatch $ matcher subject
-    captureTs = map (smartSlice subject <$>) sliceTs
+    sliceAndCaptureTs = unsafeLazyStreamToList $
+        mapMS (fromMatch >=> mapM enrichWithCapture) $ matcher subject
+    enrichWithCapture slice = do
+        capture <- evaluate $ smartSlice subject slice
+        return (slice, capture)
+    captureTs = map (snd <$>) sliceAndCaptureTs
 
-    mkSegments (Slice off offEnd, c, c') r prevOffEnd
+    mkSegments ((Slice off offEnd, c), c') r prevOffEnd
         | off == fromIntegral pcre2_UNSET || c == c' =
             -- This substring is unset or unchanged.  Keep going without making
             -- cuts.
