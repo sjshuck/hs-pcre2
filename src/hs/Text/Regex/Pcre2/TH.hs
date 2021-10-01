@@ -15,7 +15,6 @@ module Text.Regex.Pcre2.TH where
 import           Control.Applicative        (Alternative(..))
 import           Data.IORef
 import           Data.List.NonEmpty         (NonEmpty(..))
-import qualified Data.List.NonEmpty         as NE
 import           Data.Map.Lazy              (Map)
 import qualified Data.Map.Lazy              as Map
 import           Data.Proxy                 (Proxy(..))
@@ -45,7 +44,10 @@ import           Text.Regex.Pcre2.Internal
 -- transform them into application-level data, to avoid leaking the types to top
 -- level and having to write signatures.  In times of need, \"@Captures _@\" may
 -- be written with the help of @{-\# LANGUAGE PartialTypeSignatures \#-}@.
-newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
+newtype Captures (info :: CapturesInfo) = Captures{getCaptures :: NonEmpty Text}
+
+captured :: Lens' (NonEmpty Text) (Captures info)
+captured f cs = f (Captures cs) <&> \(Captures cs') -> cs'
 
 -- | The kind of `Captures`\'s @info@.  The first number is the total number of
 -- parenthesized captures, and the list is a lookup table from capture names to
@@ -98,9 +100,8 @@ capture = view $ _capture @i
 -- | Like `capture` but focus from a `Captures` to a capture.
 _capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
     Lens' (Captures info) Text
-_capture f (Captures cs) =
-    let (ls, c : rs) = NE.splitAt (fromInteger $ natVal @num Proxy) cs
-    in f c <&> \c' -> Captures $ NE.fromList $ ls ++ c' : rs
+_capture = _Captures . singular (ix $ fromInteger $ natVal @num Proxy) where
+    _Captures f (Captures cs) = Captures <$> f cs
 
 -- | Unexported, top-level `IORef` that\'s created upon the first runtime
 -- evaluation of a Template Haskell `Matcher`.
@@ -134,13 +135,13 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
     [] -> return Nothing
 
     -- One or more parenthesized captures.  Present
-    --     [Just "foo", Nothing, Nothing, Just "bar"]
+    --     [Just "foo", Nothing, Nothing, Just "bar", Nothing]
     -- as
-    --     '(4, '[ '("foo", 1), '("bar", 4)]).
+    --     '(5, '[ '("foo", 1), '("bar", 4)]).
     captureNames -> Just <$> promotedTupleT 2 `appT` hiQ `appT` kvsQ where
-        -- 4
+        -- 5
         hiQ = litT $ numTyLit $ fromIntegral $ length captureNames
-        -- '[ '("foo", 1), '("bar", 4), '("", 0)]
+        -- '[ '("foo", 1), '("bar", 4)]
         kvsQ = case toKVs captureNames of
             -- We can't splice '[] because it doesn't kind-check.  See above.
             []  -> [t| NoNamedCaptures |]
@@ -154,32 +155,29 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 -- | Helper for `regex` with no parenthesized captures.
 matchTH :: (Alternative f) => Text -> Text -> f Text
 matchTH patt = toAlternativeOf $
-    _capturesInternal (memoMatcher patt) get0thSlice . _Identity
+    _gcaptures (memoMatcher patt) get0thSlice . _Identity
 
 -- | Helper for `regex` with parenthesized captures.
 capturesTH :: (Alternative f) => Text -> Proxy info -> Text -> f (Captures info)
 capturesTH patt _ = toAlternativeOf $
-    _capturesInternal (memoMatcher patt) getAllSlices . to Captures
+    _gcaptures (memoMatcher patt) getAllSlices . captured
 
 -- | Helper for `regex` as a guard pattern.
 matchesTH :: Text -> Text -> Bool
-matchesTH patt = has $ _capturesInternal (memoMatcher patt) getNoSlices
+matchesTH patt = has $ _gcaptures (memoMatcher patt) getNoSlices
 
 -- | Helper for `regex` as a pattern that binds local variables.
-capturesNumberedTH :: Text -> NonEmpty Int -> Text -> [Text]
-capturesNumberedTH patt numbers = concatMap NE.toList . toListOf _cs where
-    _cs = _capturesInternal (memoMatcher patt) fromMatch
-    fromMatch = getWhitelistedSlices numbers
+capturesNumberedTH :: Text -> [Int] -> Text -> [Text]
+capturesNumberedTH patt numbers = view $
+    _gcaptures (memoMatcher patt) (getWhitelistedSlices numbers)
 
 -- | Helper for `_regex` with no parenthesized captures.
 _matchTH :: Text -> Traversal' Text Text
-_matchTH patt = _capturesInternal (memoMatcher patt) get0thSlice . _Identity
+_matchTH patt = _gcaptures (memoMatcher patt) get0thSlice . _Identity
 
 -- | Helper for `_regex` with parenthesized captures.
 _capturesTH :: Text -> Proxy info -> Traversal' Text (Captures info)
-_capturesTH patt _ = _cs . wrapped where
-    _cs = _capturesInternal (memoMatcher patt) getAllSlices
-    wrapped f cs = f (Captures cs) <&> \(Captures cs') -> cs'
+_capturesTH patt _ = _gcaptures (memoMatcher patt) getAllSlices . captured
 
 -- | === As an expression
 --
@@ -231,22 +229,22 @@ regex = QuasiQuoter{
     quotePat = \s -> do
         captureNames <- predictCaptureNamesQ s
 
-        case NE.nonEmpty $ toKVs captureNames of
+        case toKVs captureNames of
             -- No named captures.  Test whether the string matches without
             -- creating any new Text values.
-            Nothing -> viewP
+            [] -> viewP
                 [e| matchesTH (Text.pack $(stringE s)) |]
                 [p| True |]
 
             -- One or more named captures.  Attempt to bind only those to local
             -- variables of the same names.
-            Just numberedNames -> viewP e p where
-                (numbers, names) = NE.unzip numberedNames
+            numberedNames -> viewP e p where
+                (numbers, names) = unzip numberedNames
                 e = [e| capturesNumberedTH
                     (Text.pack $(stringE s))
                     $(liftData numbers) |]
-                p = foldr f wildP names where
-                    f name r = conP '(:) [varP $ mkName $ Text.unpack name, r],
+                p = foldr f wildP names
+                f name r = conP '(:) [varP $ mkName $ Text.unpack name, r],
 
     quoteType = const $ fail "regex: cannot produce a type",
 
@@ -262,11 +260,11 @@ regex = QuasiQuoter{
 -- > import Control.Lens
 -- > import Data.Text.Lens
 -- >
--- > embeddedNumber :: Traversal' String Int
--- > embeddedNumber = packed . [_regex|\d+|] . unpacked . _Show
+-- > embeddedNumbers :: Traversal' String Int
+-- > embeddedNumbers = packed . [_regex|\d+|] . unpacked . _Show
 -- >
 -- > main :: IO ()
--- > main = putStrLn $ "There are 14 competing standards" & embeddedNumber %~ (+ 1)
+-- > main = putStrLn $ "There are 14 competing standards" & embeddedNumbers %~ (+ 1)
 -- >
 -- > -- There are 15 competing standards
 _regex :: QuasiQuoter

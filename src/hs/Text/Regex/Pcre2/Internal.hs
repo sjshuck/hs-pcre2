@@ -19,7 +19,7 @@ import           Data.IntMap.Strict         (IntMap, (!?))
 import qualified Data.IntMap.Strict         as IM
 import           Data.List                  (foldl', intercalate)
 import           Data.List.NonEmpty         (NonEmpty(..))
-import qualified Data.List.NonEmpty         as NE
+import           Data.Maybe                 (fromMaybe)
 import           Data.Monoid                (Alt(..), First)
 import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
@@ -86,30 +86,30 @@ data Slice = Slice
     {-# UNPACK #-} !Text.I16
 
 -- | Zero-copy slice a 'Text'.  An unset capture is represented by a
--- `pcre2_UNSET` range and is interpreted in this library as `Text.empty`.  Note
--- this is a lazy, pure operation.
+-- `pcre2_UNSET` range and is interpreted in this library as `Text.empty`.
 thinSlice :: Text -> Slice -> Text
-thinSlice text (Slice off offEnd)
-    | off == fromIntegral pcre2_UNSET = Text.empty
-    | otherwise                       = text
+thinSlice text slice = fromMaybe Text.empty $ maybeThinSlice text slice
+
+-- | Like `thinSlice`, but encode `pcre2_UNSET` as `Nothing`.
+maybeThinSlice :: Text -> Slice -> Maybe Text
+maybeThinSlice text (Slice off offEnd)
+    | off == fromIntegral pcre2_UNSET = Nothing
+    | otherwise                       = Just $ text
         & Text.takeWord16 offEnd
         & Text.dropWord16 off
 
 -- | Slice a 'Text', copying if it\'s less than half of the original.  Note this
 -- is a lazy, pure operation.
 smartSlice :: Text -> Slice -> Text
-smartSlice text slice =
-    let substring = thinSlice text slice
-    in if Text.length substring > Text.length text `div` 2
-        then substring
-        else Text.copy substring
+smartSlice text slice = fromMaybe Text.empty $ maybeSmartSlice text slice
 
 -- | Like `smartSlice`, but only produce a result when not `pcre2_UNSET`.  It is
 -- forced when the outer `Maybe` constructor is forced.
 maybeSmartSlice :: Text -> Slice -> Maybe Text
-maybeSmartSlice text slice@(Slice start _)
-    | start == fromIntegral pcre2_UNSET = Nothing
-    | otherwise                         = Just $! smartSlice text slice
+maybeSmartSlice text slice = f <$!> maybeThinSlice text slice where
+    f substring
+        | Text.length substring > Text.length text `div` 2 = substring
+        | otherwise                                        = Text.copy substring
 
 -- | Probably unnecessary, but unrestricted 'castPtr' feels dangerous.
 class CastCUs a b | a -> b where
@@ -739,8 +739,8 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $
 
 -- | Helper to generate public matching functions.
 pureUserMatcher :: Option -> Text -> Matcher
-pureUserMatcher option patt = matcherWithEnv matchEnv where
-    matchEnv = unsafePerformIO $ userMatchEnv option patt
+pureUserMatcher option patt =
+    matcherWithEnv $ unsafePerformIO $ userMatchEnv option patt
 
 -- | A `Subber` works by first writing results to a reasonably-sized buffer.  If
 -- we run out of room, PCRE2 allows us to simulate the rest of the substitution
@@ -825,8 +825,8 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
 -- | Helper to generate substitution function.  For consistency with
 -- `pureUserMatcher`.
 pureUserSubber :: Option -> Text -> Text -> Subber
-pureUserSubber option patt = subberWithEnv matchEnv where
-    matchEnv = unsafePerformIO $ userMatchEnv option patt
+pureUserSubber option patt =
+    subberWithEnv $ unsafePerformIO $ userMatchEnv option patt
 
 -- | Generate per-call data for @pcre2_match()@ etc., to accommodate callouts.
 --
@@ -1007,16 +1007,15 @@ maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
 
 -- | The most general form of a matching function, which can also be used as a
 -- @Setter'@ to perform substitutions at the Haskell level.
-_capturesInternal :: (Traversable t) =>
+_gcaptures :: (Traversable t) =>
     Matcher -> FromMatch t -> Traversal' Text (t Text)
-_capturesInternal matcher fromMatch f subject =
-    traverse f captureTs <&> \captureTs' ->
-        -- Swag foldl-as-foldr to create only as many segments as we need to
-        -- stitch back together and no more.
-        let beforeAndAfter = zip
-                (concatMap toList sliceAndCaptureTs)
-                (concatMap toList captureTs')
-        in Text.concat $ foldr mkSegments termSegments beforeAndAfter 0
+_gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
+    -- Swag foldl-as-foldr to create only as many segments as we need to stitch
+    -- back together and no more.
+    let beforeAndAfter = zip
+            (concatMap toList sliceAndCaptureTs)
+            (concatMap toList captureTs')
+    in Text.concat $ foldr mkSegments termSegments beforeAndAfter 0
 
     where
     sliceAndCaptureTs = unsafeLazyStreamToList $
@@ -1043,9 +1042,9 @@ _capturesInternal matcher fromMatch f subject =
         in [thinSlice subject (Slice off offEnd) | off /= offEnd]
 
 -- | A function that takes a C match result and extracts captures into a
--- container.  We need to pass this effectful callback to `_capturesInternal`
--- because of the latter\'s imperative loop that reuses the same
--- @pcre2_match_data@ block.
+-- container.  We need to pass this effectful callback to `_gcaptures` because
+-- of the latter\'s imperative loop that reuses the same @pcre2_match_data@
+-- block.
 --
 -- The container type is polymorphic and in practice carries a `Traversable`
 -- constraint.  Currently the following containers are used:
@@ -1109,8 +1108,8 @@ matches = matchesOpt mempty
 
 -- | @matchesOpt mempty = matches@
 matchesOpt :: Option -> Text -> Text -> Bool
-matchesOpt option patt = has $ _capturesInternal matcher getNoSlices where
-    matcher = pureUserMatcher option patt
+matchesOpt option patt = has $
+    _gcaptures (pureUserMatcher option patt) getNoSlices
 
 -- | Match a pattern to a subject and return the portion(s) that matched in an
 -- `Alternative`, or `empty` if no match.
@@ -1120,6 +1119,8 @@ match :: (Alternative f) => Text -> Text -> f Text
 match = matchOpt mempty
 
 -- | @matchOpt mempty = match@
+--
+-- @since 2.0.0
 matchOpt :: (Alternative f) => Option -> Text -> Text -> f Text
 matchOpt option patt = toAlternativeOf $ _matchOpt option patt
 
@@ -1148,8 +1149,8 @@ gsub = subOpt SubGlobal
 -- subOpt SubGlobal = gsub
 -- @
 subOpt :: Option -> Text -> Text -> Text -> Text
-subOpt option patt replacement = snd . unsafePerformIO . subber where
-    subber = pureUserSubber option patt replacement
+subOpt option patt replacement =
+    snd . unsafePerformIO . pureUserSubber option patt replacement
 
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
 -- a subject to each non-empty list of captures that pattern matches.
@@ -1192,8 +1193,7 @@ _captures = _capturesOpt mempty
 
 -- | @_capturesOpt mempty = _captures@
 _capturesOpt :: Option -> Text -> Traversal' Text (NonEmpty Text)
-_capturesOpt option patt = _capturesInternal matcher getAllSlices where
-    matcher = pureUserMatcher option patt
+_capturesOpt option patt = _gcaptures (pureUserMatcher option patt) getAllSlices
 
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
 -- a subject to the non-overlapping portions of it that match.
@@ -1204,8 +1204,8 @@ _match = _matchOpt mempty
 
 -- | @_matchOpt mempty = _match@
 _matchOpt :: Option -> Text -> Traversal' Text Text
-_matchOpt option patt = _capturesInternal matcher get0thSlice . _Identity where
-    matcher = pureUserMatcher option patt
+_matchOpt option patt =
+    _gcaptures (pureUserMatcher option patt) get0thSlice . _Identity
 
 -- * Support for Template Haskell compile-time regex analysis
 

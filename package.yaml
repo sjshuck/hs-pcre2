@@ -64,6 +64,7 @@ library:
   - src/c/pcre2/src/pcre2_valid_utf.c
   - src/c/pcre2/src/pcre2_xclass.c
   ghc-options:
+  - -W
   - -optc=-DPCRE2_CODE_UNIT_WIDTH=16
   - -optc=-DPCRE2_STATIC=1
   - -optc=-DHAVE_INTTYPES_H=1

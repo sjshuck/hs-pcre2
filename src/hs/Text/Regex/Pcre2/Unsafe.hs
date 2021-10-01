@@ -8,7 +8,7 @@
 -- them here for completeness and use them to implement unit tests for this
 -- library; for ordinary use, however, seek other means to accomplish whatever
 -- is needed (such as accreting effects with optics), since they carry all the
--- problems of `unsafePerformIO`.  See
+-- problems of `System.IO.Unsafe.unsafePerformIO`.  See
 -- the [C API docs](https://pcre.org/current/doc/html/pcre2callout.html)
 -- for more information.
 module Text.Regex.Pcre2.Unsafe (
@@ -28,5 +28,4 @@ module Text.Regex.Pcre2.Unsafe (
     SubCalloutResult(..))
 where
 
-import System.IO.Unsafe          (unsafePerformIO)
 import Text.Regex.Pcre2.Internal

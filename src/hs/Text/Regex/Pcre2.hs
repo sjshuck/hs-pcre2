@@ -6,8 +6,8 @@ module Text.Regex.Pcre2 (
     Atop the low-level binding to the C API, we present a high-level interface
     to add regular expressions to Haskell programs.
 
-    All input and output strings are strict `Text`, which maps directly to how
-    PCRE2 operates on strings of 16-bit-wide code units.
+    All input and output strings are strict `Data.Text.Text`, which maps
+    directly to how PCRE2 operates on strings of 16-bit-wide code units.
 
     The C API requires pattern strings to be compiled and the compiled patterns
     to be executed on subject strings in discrete steps.  We hide this
@@ -52,11 +52,11 @@ module Text.Regex.Pcre2 (
 
     [Subject]:  The string the compiled regular expression is executed on.
 
-    [Regex]:  A function of the form @`Text` -> result@, where the argument is
-    the subject.  It is \"compiled\" via partial application as discussed above.
-    (Lens users:  A regex has the more abstract form
+    [Regex]:  A function of the form @`Data.Text.Text` -> result@, where the
+    argument is the subject.  It is \"compiled\" via partial application as
+    discussed above.  (Lens users:  A regex has the more abstract form
     @[Traversal\'](https://hackage.haskell.org/package/microlens/docs/Lens-Micro.html#t:Traversal-39-)
-    `Text` result@, but the concept is the same.)
+    `Data.Text.Text` result@, but the concept is the same.)
 
     [Capture (or capture group)]:  Any substrings of the subject matched by the
     pattern, meaning the whole pattern and any parenthesized groupings.  The
@@ -68,8 +68,9 @@ module Text.Regex.Pcre2 (
     [Unset capture]:  A capture considered unset as distinct from empty.  This
     can arise from matching the pattern @(a)?@ to an empty subject&#x2014;the
     0th capture will be set as empty, but the 1st will be unset altogether.  We
-    represent both as empty `Text` for simplicity.  See below for discussions
-    about how unset captures may be detected or substituted using this library.
+    represent both as empty `Data.Text.Text` for simplicity.  See below for
+    discussions about how unset captures may be detected or substituted using
+    this library.
 
     [Named capture]:  A parenthesized capture can be named like this:
     @(?\<foo\>...)@.  Whether they have names or not, captures are always
@@ -100,9 +101,9 @@ module Text.Regex.Pcre2 (
     freely inlined; see below.
 
     Also of note is the optimization that, for each capture that\'s more than
-    half the length of the subject, a zero-copy `Text` is produced in constant
-    time and space.  This can yield a large performance boost in many cases,
-    for example when splitting lines into key-value pairs as in
+    half the length of the subject, a zero-copy `Data.Text.Text` is produced in
+    constant time and space.  This can yield a large performance boost in many
+    cases, for example when splitting lines into key-value pairs as in
     the [teaser](https://github.com/sjshuck/hs-pcre2#teasers).  A downside,
     however, is that retaining these slices in memory will carry the overhead
     of the dead portions of the subject (still guaranteed to be less than the
@@ -114,9 +115,9 @@ module Text.Regex.Pcre2 (
     [APIs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/matchAll)&#x2014;including
     previous versions of [this library](https://github.com/sjshuck/hs-pcre2/issues/17)&#x2014;where
     there are separate functions to request single versus global matching, we
-    accomplish this /(since 2.0.0)/ in a unified fashion using the `Alternative`
-    typeclass.  Typically the user will choose from two instances, `Maybe` and
-    `[]`:
+    accomplish this /(since 2.0.0)/ in a unified fashion using the
+    `Control.Applicative.Alternative` typeclass.  Typically the user will
+    choose from two instances, `Maybe` and `[]`:
 
     > b2 :: (Alternative f) => Text -> f Text
     > b2 = match "b.."
@@ -155,7 +156,7 @@ module Text.Regex.Pcre2 (
     >>> handle @SomePcre2Exception (\_ -> return Nothing) $ evaluate $ broken "foo"
     Nothing
 
-    Or simply select `IO` as the `Alternative` instance:
+    Or simply select `IO` as the `Control.Applicative.Alternative` instance:
 
     >>> handle @SomePcre2Exception (\_ -> return "broken") $ broken "foo"
     "broken"
@@ -190,8 +191,9 @@ module Text.Regex.Pcre2 (
     -- @[packed](https://hackage.haskell.org/package/microlens-platform/docs/Lens-Micro-Platform.html#v:packed)@
     -- and
     -- @[unpacked](https://hackage.haskell.org/package/microlens-platform/docs/Lens-Micro-Platform.html#v:packed)@
-    -- are included for working with `Text`, and it is upwards-compatible with
-    -- the full [lens](https://hackage.haskell.org/package/lens) library.
+    -- are included for working with `Data.Text.Text`, and it is
+    -- upwards-compatible with the
+    -- full [lens](https://hackage.haskell.org/package/lens) library.
     --
     -- We expose a set of traversals that focus on matched substrings within a
     -- subject.  Like the basic functional regexes, they should be \"compiled\"
@@ -347,7 +349,5 @@ module Text.Regex.Pcre2 (
     pcreVersion)
 where
 
-import Control.Applicative       (Alternative(..))
-import Data.Text                 (Text)
 import Text.Regex.Pcre2.Internal
 import Text.Regex.Pcre2.TH
