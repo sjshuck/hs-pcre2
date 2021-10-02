@@ -2,6 +2,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
@@ -12,12 +13,11 @@ import           Control.Applicative        (Alternative(..))
 import           Control.Exception
 import           Control.Monad.State.Strict
 import           Data.Either                (partitionEithers)
-import           Data.Foldable              (toList)
+import           Data.Foldable              (foldl', toList)
 import           Data.Functor.Identity      (Identity(..))
 import           Data.IORef
 import           Data.IntMap.Strict         (IntMap, (!?))
 import qualified Data.IntMap.Strict         as IM
-import           Data.List                  (foldl', intercalate)
 import           Data.List.NonEmpty         (NonEmpty(..))
 import           Data.Maybe                 (fromMaybe)
 import           Data.Monoid                (Alt(..), First)
@@ -57,6 +57,12 @@ mkFunPtr anchor create = do
 
 bitOr :: (Foldable t, Bits a) => t a -> a
 bitOr = foldl' (.|.) zeroBits
+
+-- | Like `lines`, but don\'t remove any characters.
+unchompedLines :: String -> [String]
+unchompedLines s = case break (== '\n') s of
+    (line,     _ : rest) -> (line ++ "\n") : unchompedLines rest
+    (lastLine, "")       -> [lastLine | not $ null lastLine]
 
 -- | Equivalent to @flip fix@.
 --
@@ -1270,13 +1276,26 @@ instance Exception Pcre2Exception where
 -- last character).
 data Pcre2CompileException = Pcre2CompileException !CInt !Text !PCRE2_SIZE
 instance Show Pcre2CompileException where
-    show (Pcre2CompileException x patt offset) = intercalate "\n" $ [
-        "pcre2_compile: " ++ Text.unpack (getErrorMessage x),
-        replicate tab ' ' ++ Text.unpack patt] ++
-        [replicate (tab + offset') ' ' ++ "^" | offset' < Text.length patt]
+    show (Pcre2CompileException x patt offset) =
+        "pcre2_compile: " ++ Text.unpack (getErrorMessage x) ++ "\n" ++
+        concatMap (replicate tab ' ' ++) pattLinesMaybeWithCaret
         where
         tab = 20
+        pattLinesMaybeWithCaret
+            | offset' == Text.length patt = pattLines
+            | otherwise                   = insertCaretLine numberedPattLines
         offset' = fromIntegral offset
+        pattLines = unchompedLines $ Text.unpack patt
+        numberedPattLines = zip [0 ..] pattLines
+        (caretRow, caretCol) = (!! offset') $ do
+            (row, line) <- numberedPattLines
+            (col, _) <- zip [0 ..] line
+            return (row, col)
+        insertCaretLine = concatMap $ \(n, line) -> if
+            | n /= caretRow     -> [line]
+            | last line == '\n' -> [line, caretLine ++ "\n"]
+            | otherwise         -> [line ++ "\n", caretLine]
+        caretLine = replicate caretCol ' ' ++ "^"
 instance Exception Pcre2CompileException where
     toException = toException . SomePcre2Exception
     fromException = fromException >=> \(SomePcre2Exception e) -> cast e
