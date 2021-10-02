@@ -44,7 +44,7 @@ import           Text.Regex.Pcre2.Internal
 -- transform them into application-level data, to avoid leaking the types to top
 -- level and having to write signatures.  In times of need, \"@Captures _@\" may
 -- be written with the help of @{-\# LANGUAGE PartialTypeSignatures \#-}@.
-newtype Captures (info :: CapturesInfo) = Captures{getCaptures :: NonEmpty Text}
+newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
 
 captured :: Lens' (NonEmpty Text) (Captures info)
 captured f cs = f (Captures cs) <&> \(Captures cs') -> cs'

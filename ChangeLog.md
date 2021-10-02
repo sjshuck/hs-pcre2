@@ -1,8 +1,12 @@
 # Changelog and Acknowledgements
 
+## 2.0.2
+* Fixed a minor issue where the caret indicating pattern location of a
+  `Pcre2CompileException` was misplaced if the pattern contained a newline.
+
 ## 2.0.1
 * Added `microlens` as a dependency to improve Haddock docs (`Traversal'` _et
-  al_ are clickable) and relieve maintenance burden somewhat.
+  al._ are clickable) and relieve maintenance burden somewhat.
 * Moderate refactoring of internals.
 
 ## 2.0.0
