@@ -839,12 +839,20 @@ mkMatchTempEnv
     -> Text -- ^ Callout info requires access to the original subject.
     -> IO MatchTempEnv
 mkMatchTempEnv MatchEnv{..} subject
-    | null matchEnvCallout && null matchEnvSubCallout = return noCallouts
-    | otherwise                                       = do
+    | null matchEnvCallout && null matchEnvSubCallout = return MatchTempEnv{
+        matchTempEnvCtx = matchEnvCtx,
+        matchTempEnvRef = Nothing}
+
+    | otherwise = do
         stateRef <- newIORef CalloutState{
             calloutStateException = Nothing,
             calloutStateSubsLog   = IM.empty}
-        ctx <- mkForeignPtr pcre2_match_context_free ctxPtrForCallouts
+
+        ctx <- mkForeignPtr pcre2_match_context_free $ case matchEnvCtx of
+            -- No pre-existing match context, so create one afresh.
+            Nothing -> pcre2_match_context_create nullPtr
+            -- Pre-existing match context, so copy it.
+            Just ctx -> withForeignPtr ctx pcre2_match_context_copy
 
         -- Install C function pointers in the @pcre2_match_context@.  When
         -- dereferenced and called, they will force the user-supplied Haskell
@@ -890,16 +898,6 @@ mkMatchTempEnv MatchEnv{..} subject
         return MatchTempEnv{
             matchTempEnvCtx = Just ctx,
             matchTempEnvRef = Just stateRef}
-
-    where
-    noCallouts = MatchTempEnv{
-        matchTempEnvCtx = matchEnvCtx,
-        matchTempEnvRef = Nothing}
-    ctxPtrForCallouts = case matchEnvCtx of
-        -- No pre-existing match context, so create one afresh.
-        Nothing -> pcre2_match_context_create nullPtr
-        -- Pre-existing match context, so copy it.
-        Just ctx -> withForeignPtr ctx pcre2_match_context_copy
 
 -- | Per-call data for @pcre2_match()@ etc.
 data MatchTempEnv = MatchTempEnv{
