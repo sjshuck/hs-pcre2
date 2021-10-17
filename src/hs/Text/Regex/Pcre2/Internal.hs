@@ -16,7 +16,7 @@ import           Data.Either                (partitionEithers)
 import           Data.Foldable              (foldl', toList)
 import           Data.Functor.Identity      (Identity(..))
 import           Data.IORef
-import           Data.IntMap.Strict         (IntMap, (!?))
+import           Data.IntMap.Strict         (IntMap)
 import qualified Data.IntMap.Strict         as IM
 import           Data.List.NonEmpty         (NonEmpty(..))
 import           Data.Maybe                 (fromMaybe)
@@ -593,36 +593,33 @@ extractCompileEnv = do
     xtraOpts <- bitOr <$> extractOptsOf _CompileExtraOption
     recGuard <- preview _last <$> extractOptsOf _CompileRecGuardOption
 
-    compileEnvCtx <- sequence $ do
-        guard $ not $ null ctxUpds && xtraOpts == 0 && null recGuard
-        Just $ liftIO $ do
+    if null ctxUpds && xtraOpts == 0 && null recGuard
+        then return CompileEnv{
+            compileEnvCtx  = Nothing,
+            compileEnvERef = Nothing}
+
+        else liftIO $ do
             ctx <- mkForeignPtr pcre2_compile_context_free $
                 pcre2_compile_context_create nullPtr
 
             forM_ ctxUpds $ \update -> update ctx
+
             when (xtraOpts /= 0) $ withForeignPtr ctx $ \ctxPtr ->
                 pcre2_set_compile_extra_options ctxPtr xtraOpts >>= check (== 0)
 
-            return ctx
+            compileEnvERef <- forM recGuard $ \f -> do
+                eRef <- newIORef Nothing
+                funPtr <- mkFunPtr ctx $ mkRecursionGuard $ \depth _ -> do
+                    resultOrE <- try $ f (fromIntegral depth) >>= evaluate
+                    case resultOrE of
+                        Right success -> return $ if success then 0 else 1
+                        Left e        -> writeIORef eRef (Just e) >> return 1
+                withForeignPtr ctx $ \ctxPtr ->
+                    pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>=
+                        check (== 0)
+                return eRef
 
-    compileEnvERef <- sequence $ do
-        ctx <- compileEnvCtx
-        f <- recGuard
-        Just $ liftIO $ do
-            eRef <- newIORef Nothing
-            funPtr <- mkFunPtr ctx $ mkRecursionGuard $ \depth _ -> do
-                resultOrE <- try $ f (fromIntegral depth) >>= evaluate
-                case resultOrE of
-                    Right success -> return $ if success then 0 else 1
-                    Left e        -> writeIORef eRef (Just e) >> return 1
-
-            withForeignPtr ctx $ \ctxPtr ->
-                pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>=
-                    check (== 0)
-
-            return eRef
-
-    return CompileEnv{..}
+            return CompileEnv{compileEnvCtx = Just ctx, ..}
 
 -- | Inputs to `Code` compilation besides the pattern.
 data CompileEnv = CompileEnv{
@@ -650,7 +647,7 @@ extractCode patt CompileEnv{..} = do
                 ctxPtr
             when (codePtr == nullPtr) $ do
                 -- Re-throw exception (if any) from recursion guard (if any)
-                forOf_ _Just compileEnvERef $ readIORef >=> mapM_ throwIO
+                forM_ compileEnvERef $ readIORef >=> mapM_ throwIO
                 -- Otherwise throw PCRE2 error
                 errorCode <- peek errorCodePtr
                 offCUs <- peek errorOffPtr
@@ -678,9 +675,7 @@ extractMatchEnv matchEnvCode = do
         ctxUpds -> liftIO $ Just <$> do
             ctx <- mkForeignPtr pcre2_match_context_free $
                 pcre2_match_context_create nullPtr
-
             forM_ ctxUpds $ \update -> update ctx
-
             return ctx
 
     matchEnvCallout <- preview _last <$> extractOptsOf _CalloutOption
@@ -818,7 +813,7 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
                         -- Do not run any substitution callouts run previously.
                         matchEnvSubCallout = fastFwd <$> matchEnvSubCallout}
                     fastFwd f = \info ->
-                        case subsLog !? subCalloutSubsCount info of
+                        case subsLog IM.!? subCalloutSubsCount info of
                             Just result -> return result
                             Nothing     -> f info
                 MatchTempEnv{..} <- mkMatchTempEnv finalMatchEnv subject
@@ -857,7 +852,7 @@ mkMatchTempEnv MatchEnv{..} subject
         -- saving them.
 
         -- Install callout, if any
-        forOf_ _Just matchEnvCallout $ \f -> do
+        forM_ matchEnvCallout $ \f -> do
             funPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
                 info <- getCalloutInfo subject blockPtr
                 resultOrE <- try $ f info >>= evaluate
@@ -873,7 +868,7 @@ mkMatchTempEnv MatchEnv{..} subject
                 pcre2_set_callout ctxPtr funPtr nullPtr >>= check (== 0)
 
         -- Install substitution callout, if any
-        forOf_ _Just matchEnvSubCallout $ \f -> do
+        forM_ matchEnvSubCallout $ \f -> do
             funPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
                 info <- getSubCalloutInfo subject blockPtr
                 resultOrE <- try $ f info >>= evaluate
@@ -888,9 +883,9 @@ mkMatchTempEnv MatchEnv{..} subject
                     Left e -> do
                         modifyIORef' stateRef $ _calloutStateException ?~ e
                         return (-1)
-            withForeignPtr ctx $ \ctxPtr -> do
-                result <- pcre2_set_substitute_callout ctxPtr funPtr nullPtr
-                check (== 0) result
+            withForeignPtr ctx $ \ctxPtr ->
+                pcre2_set_substitute_callout ctxPtr funPtr nullPtr >>=
+                    check (== 0)
 
         return MatchTempEnv{
             matchTempEnvCtx = Just ctx,
@@ -1059,7 +1054,10 @@ _gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
 --
 -- * `Identity` when we only want the 0th;
 --
--- * `Proxy` when we are only checking if a match succeeded.
+-- * `Proxy` when we are only checking if a match succeeded;
+--
+-- * `[]` when we want to easily pattern match specific capture groups via
+--   Template Haskell-generated @ViewPatterns@.
 type FromMatch t = Ptr Pcre2_match_data -> IO (t Slice)
 
 -- | Read all specifically indexed captures\' offsets from match results.
@@ -1246,7 +1244,7 @@ getCaptureNames codePtr = do
 
     hiCaptNum <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
 
-    return $ map (names !?) [1 .. fromIntegral hiCaptNum]
+    return $ map (names IM.!?) [1 .. fromIntegral hiCaptNum]
 
 -- | Low-level access to compiled pattern info, per the docs.
 getCodeInfo :: (Storable a) => Ptr Pcre2_code -> CUInt -> IO a
