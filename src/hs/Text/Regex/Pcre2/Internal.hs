@@ -1,6 +1,5 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RankNTypes #-}
@@ -28,7 +27,7 @@ import qualified Data.Text.Foreign          as Text
 import           Data.Typeable              (cast)
 import           Data.Void                  (Void, absurd)
 import           Foreign
-import           Foreign.C.Types
+import           Foreign.C.Types            (CInt(..), CUInt(..), CUShort)
 import qualified Foreign.Concurrent         as Conc
 import           Lens.Micro
 import           Lens.Micro.Extras          (preview, view)
@@ -117,13 +116,13 @@ maybeSmartSlice text slice = f <$!> maybeThinSlice text slice where
         | Text.length substring > Text.length text `div` 2 = substring
         | otherwise                                        = Text.copy substring
 
--- | Probably unnecessary, but unrestricted 'castPtr' feels dangerous.
-class CastCUs a b | a -> b where
-    castCUs :: Ptr a -> Ptr b
-    castCUs = castPtr
-    {-# INLINE castCUs #-}
-instance CastCUs CUShort Word16
-instance CastCUs Word16 CUShort
+-- | Safe, type-restricted `castPtr`.
+fromCUs :: Ptr CUShort -> Ptr Word16
+fromCUs = castPtr
+
+-- | Safe, type-restricted `castPtr`.
+toCUs :: Ptr Word16 -> Ptr CUShort
+toCUs = castPtr
 
 -- ** Lens utilities
 
@@ -139,9 +138,9 @@ _Identity f (Identity x) = Identity <$> f x
 -- | A @FreeT@-style stream that can short-circuit.
 data Stream b m a
     = StreamPure a
-    | StreamYield b (Stream b m a)    -- ^ yield a value and keep going
-    | StreamEffect (m (Stream b m a)) -- ^ have an effect and keep going
-    | StreamStop                      -- ^ short-circuit
+    | StreamYield b (Stream b m a)    -- ^ Yield a value and keep going.
+    | StreamEffect (m (Stream b m a)) -- ^ Have an effect and keep going.
+    | StreamStop                      -- ^ Short-circuit.
     deriving (Functor)
 
 instance (Functor m) => Applicative (Stream b m) where
@@ -639,7 +638,7 @@ extractCode patt CompileEnv{..} = do
         alloca $ \errorOffPtr ->
         withForeignOrNullPtr compileEnvCtx $ \ctxPtr -> do
             codePtr <- pcre2_compile
-                (castCUs pattPtr)
+                (toCUs pattPtr)
                 (fromIntegral pattCUs)
                 opts
                 errorCodePtr
@@ -705,7 +704,7 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $
             result <- liftIO $ withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
                 pcre2_match
                     codePtr
-                    (castCUs subjPtr)
+                    (toCUs subjPtr)
                     (fromIntegral subjCUs)
                     curOff
                     matchEnvOpts
@@ -771,13 +770,13 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
             run :: CUInt -> Ptr Pcre2_match_context -> PCRE2_SPTR -> IO CInt
             run curOpts ctxPtr outBufPtr = pcre2_substitute
                 codePtr
-                (castCUs subjPtr)
+                (toCUs subjPtr)
                 (fromIntegral subjCUs)
                 0
                 (matchEnvOpts .|. curOpts)
                 nullPtr
                 ctxPtr
-                (castCUs replPtr)
+                (toCUs replPtr)
                 (fromIntegral replCUs)
                 outBufPtr
                 outLenPtr
@@ -787,7 +786,7 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
             checkAndGetOutput result outBufPtr = do
                 check (> 0) result
                 outLen <- peek outLenPtr
-                out <- Text.fromPtr (castCUs outBufPtr) (fromIntegral outLen)
+                out <- Text.fromPtr (fromCUs outBufPtr) (fromIntegral outLen)
                 return (result, out)
 
         poke outLenPtr $ fromIntegral initOutLen
@@ -940,7 +939,7 @@ getCalloutInfo calloutSubject blockPtr = do
             else do
                 -- String callout
                 len <- pcre2_callout_block_callout_string_length blockPtr
-                CalloutName <$> Text.fromPtr (castCUs str) (fromIntegral len)
+                CalloutName <$> Text.fromPtr (fromCUs str) (fromIntegral len)
 
     calloutCaptures <- do
         ovecPtr <- pcre2_callout_block_offset_vector blockPtr
@@ -962,7 +961,7 @@ getCalloutInfo calloutSubject blockPtr = do
                 len <- fix1 0 $ \continue off -> peekElemOff ptr off >>= \case
                     0 -> return off
                     _ -> continue $ off + 1
-                Text.fromPtr (castCUs ptr) (fromIntegral len)
+                Text.fromPtr (fromCUs ptr) (fromIntegral len)
 
     flags <- pcre2_callout_block_callout_flags blockPtr
     let calloutIsFirst = flags .&. pcre2_CALLOUT_STARTMATCH /= 0
@@ -993,7 +992,7 @@ getSubCalloutInfo subCalloutSubject blockPtr = do
         offsetsPtr <- pcre2_substitute_callout_block_output_offsets blockPtr
         [start, end] <- forM [0, 1] $ peekElemOff offsetsPtr
         Text.fromPtr
-            (castCUs $ advancePtr outPtr $ fromIntegral start)
+            (fromCUs $ advancePtr outPtr $ fromIntegral start)
             (fromIntegral $ end - start)
 
     return SubCalloutInfo{..}
@@ -1236,7 +1235,7 @@ getCaptureNames codePtr = do
         groupNumber <- peek entryPtr
         groupNameLen <- lengthArray0 0 groupNamePtr
         groupName <- Text.fromPtr
-            (castCUs groupNamePtr)
+            (fromCUs groupNamePtr)
             (fromIntegral groupNameLen)
         return (fromIntegral groupNumber, groupName)
 
@@ -1302,7 +1301,7 @@ getErrorMessage errorCode = unsafePerformIO $ do
     let bufCUs = 120
     allocaBytes (bufCUs * 2) $ \bufPtr -> do
         cus <- pcre2_get_error_message errorCode bufPtr (fromIntegral bufCUs)
-        Text.fromPtr (castCUs bufPtr) (fromIntegral cus)
+        Text.fromPtr (fromCUs bufPtr) (fromIntegral cus)
 
 -- | Most PCRE2 C functions return an @int@ indicating a possible error.  Test
 -- it against a predicate, and throw an exception upon failure.

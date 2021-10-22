@@ -20,7 +20,7 @@ import qualified Data.Map.Lazy              as Map
 import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
-import           Data.Type.Bool             (If, type (||))
+import           Data.Type.Bool             (type (||), If)
 import           Data.Type.Equality         (type (==))
 import           GHC.TypeLits               hiding (Text)
 import qualified GHC.TypeLits               as TypeLits
@@ -45,9 +45,6 @@ import           Text.Regex.Pcre2.Internal
 -- level and having to write signatures.  In times of need, \"@Captures _@\" may
 -- be written with the help of @{-\# LANGUAGE PartialTypeSignatures \#-}@.
 newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
-
-captured :: Lens' (NonEmpty Text) (Captures info)
-captured f cs = f (Captures cs) <&> \(Captures cs') -> cs'
 
 -- | The kind of `Captures`\'s @info@.  The first number is the total number of
 -- parenthesized captures, and the list is a lookup table from capture names to
@@ -154,13 +151,11 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
 
 -- | Helper for `regex` with no parenthesized captures.
 matchTH :: (Alternative f) => Text -> Text -> f Text
-matchTH patt = toAlternativeOf $
-    _gcaptures (memoMatcher patt) get0thSlice . _Identity
+matchTH patt = toAlternativeOf $ _matchTH patt
 
 -- | Helper for `regex` with parenthesized captures.
 capturesTH :: (Alternative f) => Text -> Proxy info -> Text -> f (Captures info)
-capturesTH patt _ = toAlternativeOf $
-    _gcaptures (memoMatcher patt) getAllSlices . captured
+capturesTH patt proxy = toAlternativeOf $ _capturesTH patt proxy
 
 -- | Helper for `regex` as a guard pattern.
 matchesTH :: Text -> Text -> Bool
@@ -177,7 +172,8 @@ _matchTH patt = _gcaptures (memoMatcher patt) get0thSlice . _Identity
 
 -- | Helper for `_regex` with parenthesized captures.
 _capturesTH :: Text -> Proxy info -> Traversal' Text (Captures info)
-_capturesTH patt _ = _gcaptures (memoMatcher patt) getAllSlices . captured
+_capturesTH patt _ = _gcaptures (memoMatcher patt) getAllSlices . captured where
+    captured f cs = f (Captures cs) <&> \(Captures cs') -> cs'
 
 -- | === As an expression
 --
