@@ -322,7 +322,7 @@ data Option
     -- argument.  Returning @False@ aborts pattern compilation with an
     -- exception.  Multiples of this option before the rightmost are ignored.
     --
-    -- /NOTE: Currently (PCRE2 version 10\.37) patterns seem to be compiled in/
+    -- /NOTE: Currently (PCRE2 version 10\.39) patterns seem to be compiled in/
     -- /two passes, both times triggering the recursion guard.  Also, it is/
     -- /triggered at the beginning of the pattern, passing 0.  None of this is/
     -- /documented; expect the unexpected in the presence of side effects!/
