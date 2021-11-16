@@ -1,5 +1,10 @@
 # Changelog and Acknowledgements
 
+## 2.0.3
+* Updated PCRE2 to 10.39 (no API changes).  The C sources are now drawn from
+  https://github.com/PhilipHazel/pcre2.git, which fixes
+  [#10](https://github.com/sjshuck/hs-pcre2/issues/10).
+
 ## 2.0.2
 * Fixed a minor issue where the caret indicating pattern location of a
   `Pcre2CompileException` was misplaced if the pattern contained a newline.
