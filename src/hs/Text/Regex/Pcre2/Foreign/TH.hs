@@ -4,7 +4,7 @@ import Language.Haskell.TH
 
 {-
     For example,
-constant "ERROR_NOMATCH" ''CInt
+constant ''CInt "ERROR_NOMATCH"
     will produce
 foreign import capi unsafe "pcre2.h value PCRE2_ERROR_NOMATCH"
     pcre2_ERROR_NOMATCH :: CInt
@@ -18,7 +18,7 @@ constant typeName suffix = return [dec] where
 
 {-
     For example,
-getter "callout_block" "version" ''CUInt
+getter "callout_block" ''CUInt "version"
     will produce
 foreign import capi unsafe "getters.h" pcre2_callout_block_version
     :: Ptr Pcre2_callout_block

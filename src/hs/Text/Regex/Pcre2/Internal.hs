@@ -539,8 +539,8 @@ applyOption = \case
         MatchContextOption pcre2_set_offset_limit (fromIntegral limit)
 
     where
-    unary ctor f x = (: []) $ ctor $ \ctx -> withForeignPtr ctx $ \ctxPtr ->
-        f ctxPtr x >>= check (== 0)
+    unary ctor f x = [ctor $ \ctx -> withForeignPtr ctx applyAndCheck] where
+        applyAndCheck ctxPtr = f ctxPtr x >>= check (== 0)
 
 -- | Intermediate representation of options expressing what effect they\'ll have
 -- on which stage of regex compilation\/execution.  Also provide fake @Prism'@s.
@@ -1053,7 +1053,7 @@ _gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
 --
 -- * `Proxy` when we are only checking if a match succeeded;
 --
--- * `[]` when we want to easily pattern match specific capture groups via
+-- * @[]@ when we want to easily pattern match specific capture groups via
 --   Template Haskell-generated @ViewPatterns@.
 type FromMatch t = Ptr Pcre2_match_data -> IO (t Slice)
 
@@ -1064,9 +1064,9 @@ getWhitelistedSlices whitelist matchDataPtr = do
     let peekOvec :: Int -> IO Text.I16
         peekOvec = fmap fromIntegral . peekElemOff ovecPtr
 
-    forM whitelist $ \i -> liftM2 Slice
-        (peekOvec $ i * 2)
-        (peekOvec $ i * 2 + 1)
+    forM whitelist $ \i -> Slice
+        <$> peekOvec (i * 2)
+        <*> peekOvec (i * 2 + 1)
 
 -- | Read just the 0th capture\'s offsets from match results.
 get0thSlice :: FromMatch Identity
