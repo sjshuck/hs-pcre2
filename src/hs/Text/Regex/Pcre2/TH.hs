@@ -45,6 +45,7 @@ import           Text.Regex.Pcre2.Internal
 -- level and having to write signatures.  In times of need, \"@Captures _@\" may
 -- be written with the help of @{-\# LANGUAGE PartialTypeSignatures \#-}@.
 newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
+    deriving (Show)
 
 -- | The kind of `Captures`\'s @info@.  The first number is the total number of
 -- parenthesized captures, and the list is a lookup table from capture names to

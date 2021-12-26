@@ -188,6 +188,11 @@ main = hspec $ do
                     & embeddedNumber %~ (+ 1)
             result `shouldBe` "There are 15 competing standards"
 
+    describe "Captures" $ do
+        it "have a predictable Show instance" $ do
+            cs <- [regex|a(b)(?<c>c)|] "abc"
+            show cs `shouldBe` "Captures (\"abc\" :| [\"b\",\"c\"])"
+
     describe "an unset capture" $ do
         it "is treated as empty" $ do
             captures "(a)?" "" `shouldBe` Just ("" :| [""])

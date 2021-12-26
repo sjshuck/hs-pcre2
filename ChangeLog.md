@@ -1,5 +1,8 @@
 # Changelog and Acknowledgements
 
+## 2.0.4
+* Added `Show` instance for `Captures` to ease debugging user code.
+
 ## 2.0.3
 * Updated PCRE2 to 10.39 (no API changes).  The C sources are now drawn from
   https://github.com/PhilipHazel/pcre2.git, which fixes
