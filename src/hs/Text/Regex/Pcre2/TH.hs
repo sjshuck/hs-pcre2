@@ -41,9 +41,7 @@ import           Text.Regex.Pcre2.Internal
 -- `CapturesInfo` is not part of the public API and may change without warning.
 --
 -- After obtaining `Captures` it\'s recommended to immediately consume them and
--- transform them into application-level data, to avoid leaking the types to top
--- level and having to write signatures.  In times of need, \"@Captures _@\" may
--- be written with the help of @{-\# LANGUAGE PartialTypeSignatures \#-}@.
+-- transform them into application-level data, to avoid leaking the types.
 newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
     deriving (Show)
 
