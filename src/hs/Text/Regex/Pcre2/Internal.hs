@@ -4,7 +4,6 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TypeApplications #-}
 
 module Text.Regex.Pcre2.Internal where
 
@@ -1208,47 +1207,6 @@ _matchOpt :: Option -> Text -> Traversal' Text Text
 _matchOpt option patt =
     _gcaptures (pureUserMatcher option patt) get0thSlice . _Identity
 
--- * Support for Template Haskell compile-time regex analysis
-
--- | From options and pattern, determine parenthesized captures\' names in
--- order.
-predictCaptureNames :: Option -> Text -> IO [Maybe Text]
-predictCaptureNames option patt = do
-    code <- evalStateT
-        (extractCompileEnv >>= extractCode patt)
-        (applyOption option)
-
-    withForeignPtr code getCaptureNames
-
--- | Get parenthesized captures\' names in order.
-getCaptureNames :: Ptr Pcre2_code -> IO [Maybe Text]
-getCaptureNames codePtr = do
-    nameCount <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMECOUNT
-    nameEntrySize <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMEENTRYSIZE
-    nameTable <- getCodeInfo @PCRE2_SPTR codePtr pcre2_INFO_NAMETABLE
-
-    -- Can't do [0 .. nameCount - 1] because it underflows when nameCount == 0
-    let indexes = takeWhile (< nameCount) [0 ..]
-    names <- fmap IM.fromList $ forM indexes $ \i -> do
-        let entryPtr = nameTable `advancePtr` fromIntegral (i * nameEntrySize)
-            groupNamePtr = entryPtr `advancePtr` 1
-        groupNumber <- peek entryPtr
-        groupNameLen <- lengthArray0 0 groupNamePtr
-        groupName <- Text.fromPtr
-            (fromCUs groupNamePtr)
-            (fromIntegral groupNameLen)
-        return (fromIntegral groupNumber, groupName)
-
-    hiCaptNum <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
-
-    return $ map (names IM.!?) [1 .. fromIntegral hiCaptNum]
-
--- | Low-level access to compiled pattern info, per the docs.
-getCodeInfo :: (Storable a) => Ptr Pcre2_code -> CUInt -> IO a
-getCodeInfo codePtr what = alloca $ \wherePtr -> do
-    pcre2_pattern_info codePtr what wherePtr >>= check (== 0)
-    peek wherePtr
-
 -- * Exceptions
 
 -- | The root of the PCRE2 exception hierarchy.
@@ -1273,7 +1231,7 @@ data Pcre2CompileException = Pcre2CompileException !CInt !Text !PCRE2_SIZE
 instance Show Pcre2CompileException where
     show (Pcre2CompileException x patt offset) =
         "pcre2_compile: " ++ Text.unpack (getErrorMessage x) ++ "\n" ++
-        concatMap (replicate tab ' ' ++) pattLinesMaybeWithCaret
+            concatMap (replicate tab ' ' ++) pattLinesMaybeWithCaret
         where
         tab = 20
         pattLinesMaybeWithCaret
@@ -1281,7 +1239,7 @@ instance Show Pcre2CompileException where
             | otherwise                   = insertCaretLine numberedPattLines
         offset' = fromIntegral offset
         pattLines = unchompedLines $ Text.unpack patt
-        numberedPattLines = zip [0 ..] pattLines
+        numberedPattLines = zip [0 :: Int ..] pattLines
         (caretRow, caretCol) = (!! offset') $ do
             (row, line) <- numberedPattLines
             (col, _) <- zip [0 ..] line

@@ -1,9 +1,9 @@
 // Functions to get PCRE2 struct fields.
 
-#include <pcre2.h>
-
 #ifndef GETTERS_H
 #define GETTERS_H
+
+#include <pcre2.h>
 
 #ifdef GETTER
 #error GETTER already defined

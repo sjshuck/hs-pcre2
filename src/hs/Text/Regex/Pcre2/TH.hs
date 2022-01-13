@@ -12,24 +12,30 @@
 
 module Text.Regex.Pcre2.TH where
 
+import           Control.Monad.State.Strict (evalStateT, forM)
 import           Control.Applicative        (Alternative(..))
 import           Data.IORef
+import qualified Data.IntMap.Strict         as IM
 import           Data.List.NonEmpty         (NonEmpty(..))
 import           Data.Map.Lazy              (Map)
 import qualified Data.Map.Lazy              as Map
 import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
+import qualified Data.Text.Foreign          as Text
 import           Data.Type.Bool             (type (||), If)
 import           Data.Type.Equality         (type (==))
+import           Foreign
+import           Foreign.C                  (CUInt)
 import           GHC.TypeLits               hiding (Text)
 import qualified GHC.TypeLits               as TypeLits
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Quote
-import           Language.Haskell.TH.Syntax
+import           Language.Haskell.TH.Syntax (liftData)
 import           Lens.Micro
 import           Lens.Micro.Extras          (view)
 import           System.IO.Unsafe           (unsafePerformIO)
+import           Text.Regex.Pcre2.Foreign
 import           Text.Regex.Pcre2.Internal
 
 -- | A wrapper around a list of captures that carries additional type-level
@@ -115,7 +121,46 @@ memoMatcher patt = unsafePerformIO $ do
             let matcher = pureUserMatcher mempty patt
             in (Map.insert patt matcher cache, matcher)
 
--- | Predict parenthesized captures \(maybe named\) of a pattern at splice time.
+-- | From options and pattern, determine parenthesized captures\' names in
+-- order.
+predictCaptureNames :: Option -> Text -> IO [Maybe Text]
+predictCaptureNames option patt = do
+    code <- evalStateT
+        (extractCompileEnv >>= extractCode patt)
+        (applyOption option)
+
+    withForeignPtr code getCaptureNames
+
+-- | Get parenthesized captures\' names in order.
+getCaptureNames :: Ptr Pcre2_code -> IO [Maybe Text]
+getCaptureNames codePtr = do
+    nameCount <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMECOUNT
+    nameEntrySize <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMEENTRYSIZE
+    nameTable <- getCodeInfo @PCRE2_SPTR codePtr pcre2_INFO_NAMETABLE
+
+    -- Can't do [0 .. nameCount - 1] because it underflows when nameCount == 0
+    let indexes = takeWhile (< nameCount) [0 ..]
+    names <- fmap IM.fromList $ forM indexes $ \i -> do
+        let entryPtr = nameTable `advancePtr` fromIntegral (i * nameEntrySize)
+            groupNamePtr = entryPtr `advancePtr` 1
+        groupNumber <- peek entryPtr
+        groupNameLen <- lengthArray0 0 groupNamePtr
+        groupName <- Text.fromPtr
+            (fromCUs groupNamePtr)
+            (fromIntegral groupNameLen)
+        return (fromIntegral groupNumber, groupName)
+
+    hiCaptNum <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
+
+    return $ map (names IM.!?) [1 .. fromIntegral hiCaptNum]
+
+-- | Low-level access to compiled pattern info, per the docs.
+getCodeInfo :: (Storable a) => Ptr Pcre2_code -> CUInt -> IO a
+getCodeInfo codePtr what = alloca $ \wherePtr -> do
+    pcre2_pattern_info codePtr what wherePtr >>= check (== 0)
+    peek wherePtr
+
+-- | Predict parenthesized captures (maybe named) of a pattern at splice time.
 predictCaptureNamesQ :: String -> Q [Maybe Text]
 predictCaptureNamesQ = runIO . predictCaptureNames mempty . Text.pack
 

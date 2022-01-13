@@ -200,7 +200,7 @@ module Text.Regex.Pcre2 (
     -- and memoized, rather than created inline.
     --
     -- > _nee :: Traversal' Text Text
-    -- > _nee = _match "(?i)\\bnee\\b"
+    -- > _nee = _matchOpt (Caseless <> MatchWord) "nee"
     --
     -- In addition to getting results, they support global substitution through
     -- setting; more generally, they can accrete effects while performing
