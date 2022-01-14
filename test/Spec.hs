@@ -11,11 +11,11 @@ import           Control.Exception       (catch, evaluate, handle)
 import           Control.Monad.RWS.Lazy  (ask, evalRWS, forM_, tell, void)
 import           Data.IORef
 import           Data.List.NonEmpty      (NonEmpty(..))
-import           Data.Proxy              (Proxy(..))
 import           Data.Text               (Text)
 import qualified Data.Text               as Text
 import           Lens.Micro.Platform
 import           Test.Hspec
+import           Text.Printf             (printf)
 import           Text.Regex.Pcre2
 import           Text.Regex.Pcre2.Unsafe
 
@@ -54,23 +54,29 @@ main = hspec $ do
                 `shouldBe` ["a", "a", "a"]
             readIORef counter `shouldReturn` 3
 
+        issue 18 it "fills up Alternative containers" $ do
+            let result :: (Alternative f) => f Text
+                result = match "\\d+" "123 456"
+            result `shouldBe` Just "123"
+            result `shouldBe` ["123", "456"]
+
     describe "lens-powered matching" $ do
         let _nee :: Traversal' Text Text
-            _nee = _match "(?i)\\bnee\\b"
+            _nee = _matchOpt (Caseless <> MatchWord) "nee"
             promptNee = traverseOf (_nee . unpacked) $ \s -> tell [s] >> ask
 
         it "can accrete effects while performing replacements" $ do
             let result = evalRWS
                     (promptNee "We are the knights who say...NEE!")
                     "NOO"
-                    Proxy
+                    ()
             result `shouldBe` ("We are the knights who say...NOO!", ["NEE"])
 
         it "signals match failure by not targeting anything" $ do
             let result = evalRWS
                     (promptNee "Shhhhh")
                     (error "should be unreachable")
-                    Proxy
+                    ()
             result `shouldBe` ("Shhhhh", [])
 
         it "does not substitute when setting equal Text" $ do
@@ -166,6 +172,11 @@ main = hspec $ do
                         year `shouldBe` 2020
                     _ -> expectationFailure "regex didn't match"
 
+            issue 4 it "works with possibly unset named captures" $ do
+                let f = fmap (capture @"b") . [regex|(?<a>a)|(?<b>b)|]
+                f "a" `shouldReturn` ""
+                f "b" `shouldReturn` "b"
+
             it "works without named captures" $ do
                 case "abc" of
                     [regex|a(b)c|] -> return ()
@@ -211,24 +222,10 @@ main = hspec $ do
         it "converges in the presence of empty matches" $ do
             length (match @[] "" "12345") `shouldBe` 6
 
-    describe "bug fixes" bugFixes
-
-bugFixes :: Spec
-bugFixes = do
-    issue 4 $ do
-        let f = fmap (capture @"b") . [regex|(?<a>a)|(?<b>b)|]
-        f "a" `shouldReturn` ""
-        f "b" `shouldReturn` "b"
-
-    issue 18 $ do
-        let result :: (Alternative f) => f Text
-            result = match "\\d+" "123 456"
-        result `shouldBe` Just "123"
-        result `shouldBe` ["123", "456"]
-
-    where
-    issue :: Int -> Expectation -> Spec
-    issue n = it $ "https://github.com/sjshuck/hs-pcre2/issues/" ++ show n
+-- This doesn't work
+issue :: Int -> (String -> a) -> String -> a
+issue n f label = f $
+    printf "%s (https://github.com/sjshuck/hs-pcre2/issues/%d)" label n
 
 onlyCausesOneCompilation :: (Option -> Text -> a) -> Expectation
 onlyCausesOneCompilation regexWithOpt = do
