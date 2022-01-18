@@ -49,7 +49,7 @@ import           Text.Regex.Pcre2.Internal
 -- After obtaining `Captures` it\'s recommended to immediately consume them and
 -- transform them into application-level data, to avoid leaking the types.
 newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
-    deriving (Show)
+    deriving (Show {- ^ @since 2.0.4 -})
 
 -- | The kind of `Captures`\'s @info@.  The first number is the total number of
 -- parenthesized captures, and the list is a lookup table from capture names to

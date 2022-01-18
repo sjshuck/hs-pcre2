@@ -21,8 +21,6 @@ import           Text.Regex.Pcre2.Unsafe
 
 main :: IO ()
 main = hspec $ do
-    let submitted = "submitted 2020-10-20"
-
     describe "partial application" $ do
         it "only causes one compilation" $ do
             onlyCausesOneCompilation $ \option ->
@@ -54,7 +52,7 @@ main = hspec $ do
                 `shouldBe` ["a", "a", "a"]
             readIORef counter `shouldReturn` 3
 
-        issue 18 it "fills up Alternative containers" $ do
+        it ("fills up Alternative containers" `issue` 18) $ do
             let result :: (Alternative f) => f Text
                 result = match "\\d+" "123 456"
             result `shouldBe` Just "123"
@@ -172,7 +170,7 @@ main = hspec $ do
                         year `shouldBe` 2020
                     _ -> expectationFailure "regex didn't match"
 
-            issue 4 it "works with possibly unset named captures" $ do
+            it ("works with possibly unset named captures" `issue` 4) $ do
                 let f = fmap (capture @"b") . [regex|(?<a>a)|(?<b>b)|]
                 f "a" `shouldReturn` ""
                 f "b" `shouldReturn` "b"
@@ -222,10 +220,9 @@ main = hspec $ do
         it "converges in the presence of empty matches" $ do
             length (match @[] "" "12345") `shouldBe` 6
 
--- This doesn't work
-issue :: Int -> (String -> a) -> String -> a
-issue n f label = f $
-    printf "%s (https://github.com/sjshuck/hs-pcre2/issues/%d)" label n
+-- | Modify label of `describe`, `it`, etc. to include a link to a Github issue.
+issue :: String -> Int -> String
+issue = printf "%s (https://github.com/sjshuck/hs-pcre2/issues/%d)"
 
 onlyCausesOneCompilation :: (Option -> Text -> a) -> Expectation
 onlyCausesOneCompilation regexWithOpt = do
@@ -248,10 +245,13 @@ onlyCausesOneCompilation regexWithOpt = do
 anyPcre2Exception :: Selector SomePcre2Exception
 anyPcre2Exception _ = True
 
+submitted :: Text
+submitted = "submitted 2020-10-20"
+
 broken :: (Alternative f) => Text -> f Text
 broken = match "*"
 
--- microlens doesn't have this yet as of 06/26/2021
+-- | @microlens@ doesn\'t have this yet as of 01/18/2022
 _Show :: (Read a, Show a) => Traversal' String a
 _Show f s = case reads s of
     [(x, "")] -> show <$> f x

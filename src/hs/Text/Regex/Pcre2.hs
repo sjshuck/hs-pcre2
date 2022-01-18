@@ -112,12 +112,11 @@ module Text.Regex.Pcre2 (
     === __Handling results and errors__
 
     In contrast to [other](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/match)
-    [APIs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/matchAll)&#x2014;including
-    previous versions of [this library](https://github.com/sjshuck/hs-pcre2/issues/17)&#x2014;where
-    there are separate functions to request single versus global matching, we
-    accomplish this /(since 2.0.0)/ in a unified fashion using the
+    [APIs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/matchAll)
+    where there are separate functions to request single versus global matching,
+    we accomplish this /(since 2.0.0)/ in a unified fashion using the
     `Control.Applicative.Alternative` typeclass.  Typically the user will
-    choose from two instances, `Maybe` and `[]`:
+    choose from two instances, `Maybe` and @[]@:
 
     > b2 :: (Alternative f) => Text -> f Text
     > b2 = match "b.."
