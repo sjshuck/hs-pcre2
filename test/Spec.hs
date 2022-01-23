@@ -9,7 +9,7 @@ module Main where
 import           Control.Applicative     (Alternative)
 import           Control.Exception       (catch, evaluate, handle)
 import           Control.Monad.RWS.Lazy  (ask, evalRWS, forM_, tell, void)
-import           Data.IORef
+import           Data.IORef              (modifyIORef', newIORef, readIORef)
 import           Data.List.NonEmpty      (NonEmpty(..))
 import           Data.Text               (Text)
 import qualified Data.Text               as Text
@@ -46,7 +46,7 @@ main = hspec $ do
         it "is lazy" $ do
             counter <- newIORef (0 :: Int)
             let callout = UnsafeCallout $ \_ -> do
-                    modifyIORef counter (+ 1)
+                    modifyIORef' counter (+ 1)
                     return CalloutProceed
             take 3 (matchOpt callout "(?C1)a" "apples and bananas")
                 `shouldBe` ["a", "a", "a"]
@@ -105,7 +105,7 @@ main = hspec $ do
         it "includes callouts" $ do
             calloutRanRef <- newIORef 0
             let callout = UnsafeCallout $ \_ -> do
-                    modifyIORef calloutRanRef (+ 1)
+                    modifyIORef' calloutRanRef (+ 1)
                     return CalloutProceed
             matchOpt callout "(?C'foo')a(?C42)a" "aa" `shouldBe` Just "aa"
             readIORef calloutRanRef `shouldReturn` 2
@@ -113,7 +113,7 @@ main = hspec $ do
         it "includes substitution callouts" $ do
             subCalloutRanRef <- newIORef 0
             let subCallout = UnsafeSubCallout $ \_ -> do
-                    modifyIORef subCalloutRanRef (+ 1)
+                    modifyIORef' subCalloutRanRef (+ 1)
                     return SubCalloutAccept
             subOpt (subCallout <> SubGlobal) "a" "b" "aa" `shouldBe` "bb"
             readIORef subCalloutRanRef `shouldReturn` 2
@@ -228,7 +228,7 @@ onlyCausesOneCompilation :: (Option -> Text -> a) -> Expectation
 onlyCausesOneCompilation regexWithOpt = do
     counter <- newIORef (0 :: Int)
     let option = UnsafeCompileRecGuard $ \_ -> do
-            modifyIORef counter (+ 1)
+            modifyIORef' counter (+ 1)
             return True
         run = void . evaluate . regexWithOpt option
         getCount = readIORef counter
