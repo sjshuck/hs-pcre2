@@ -23,7 +23,7 @@ import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
 import qualified Data.Text.Foreign          as Text
-import           Data.Type.Bool             (type (||), If)
+import           Data.Type.Bool             (If)
 import           Data.Type.Equality         (type (==))
 import           Foreign
 import           Foreign.C                  (CUInt)
@@ -65,12 +65,11 @@ type NoNamedCaptures = '[] :: [(Symbol, Nat)]
 -- | Look up the number of a capture at compile time, either by number or by
 -- name.  Throw a helpful 'TypeError' if the index doesn\'t exist.
 type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
-    CaptNum (num :: Nat) '(hi, _) =
-        If (CmpNat num 0 == 'LT || CmpNat num hi == 'GT)
-            -- then
-            (TypeError (TypeLits.Text "No capture numbered " :<>: ShowType num))
-            -- else
-            num
+    CaptNum (num :: Nat) '(hi, _) = If (num `CmpNat` hi == 'GT)
+        -- then
+        (TypeError (TypeLits.Text "No capture numbered " :<>: ShowType num))
+        -- else
+        num
 
     CaptNum (name :: Symbol) '(_, '(name, num) ': _) = num
     CaptNum (name :: Symbol) '(hi, _ ': kvs) = CaptNum name '(hi, kvs)
