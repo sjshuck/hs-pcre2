@@ -230,7 +230,7 @@ _capturesTH patt _ = _gcaptures (memoMatcher patt) getAllSlices . captured where
 --
 -- if there are none.  In other words, if there is more than the 0th capture,
 -- this behaves like `captures` (except returning an opaque `Captures` instead
--- of a `NonEmpty` list), otherwise it behaves like `match`.
+-- of a `NonEmpty` list), otherwise it behaves like `Text.Regex.Pcre2.match`.
 --
 -- To retrieve an individual capture from a `Captures`, use `capture`.
 --

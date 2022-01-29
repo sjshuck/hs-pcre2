@@ -1285,7 +1285,7 @@ getConfigString what = unsafePerformIO $ do
             pcre2_config what ptr
             Just <$> Text.fromPtr ptr (fromIntegral len - 1)
 
--- | See `Bsr`.
+-- | See t`Bsr`.
 defaultBsr :: Bsr
 defaultBsr = bsrFromC $ getConfigNumeric pcre2_CONFIG_BSR
 
@@ -1321,7 +1321,7 @@ linkSize = fromIntegral $ getConfigNumeric pcre2_CONFIG_LINKSIZE
 defaultMatchLimit :: Int
 defaultMatchLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_MATCHLIMIT
 
--- | See `Newline`.
+-- | See t`Newline`.
 defaultNewline :: Newline
 defaultNewline = newlineFromC $ getConfigNumeric pcre2_CONFIG_NEWLINE
 
