@@ -220,6 +220,10 @@ main = hspec $ do
         it "converges in the presence of empty matches" $ do
             length (match @[] "" "12345") `shouldBe` 6
 
+    describe "PCRE2 build configuration" $ do
+        it ("includes Unicode support" `issue` 21) $ do
+            matchesOpt Ucp "\\w" "aleph: \x2135" `shouldBe` True
+
 -- | Modify label of `describe`, `it`, etc. to include a link to a Github issue.
 issue :: String -> Int -> String
 issue = printf "%s (https://github.com/sjshuck/hs-pcre2/issues/%d)"
