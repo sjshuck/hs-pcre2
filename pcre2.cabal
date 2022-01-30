@@ -108,8 +108,8 @@ library
       Paths_pcre2
   hs-source-dirs:
       src/hs
-  ghc-options: -W -optc=-DPCRE2_CODE_UNIT_WIDTH=16 -optc=-Wno-discarded-qualifiers -optc=-Wno-incompatible-pointer-types
-  cc-options: -DHAVE_CONFIG_H -DPCRE2_CODE_UNIT_WIDTH=16 -DPCRE2_STATIC=1 -DHAVE_INTTYPES_H=1 -DHAVE_LIMITS_H=1 -DHAVE_MEMMOVE_H=1 -DHAVE_STDINT_H=1 -DHAVE_STDLIB_H=1 -DHAVE_STRERROR_H=1 -DHAVE_STRING_H=1 -DSUPPORT_JIT=1 -DSUPPORT_PCRE2_16=1 -DSUPPORT_UNICODE=1
+  ghc-options: -W -optc=-DPCRE2_CODE_UNIT_WIDTH=16 -optc=-DPCRE2_STATIC=1 -optc=-Wno-discarded-qualifiers -optc=-Wno-incompatible-pointer-types
+  cc-options: -DHAVE_CONFIG_H -DPCRE2_CODE_UNIT_WIDTH=16 -DHAVE_INTTYPES_H=1 -DHAVE_LIMITS_H=1 -DHAVE_MEMMOVE_H=1 -DHAVE_STDINT_H=1 -DHAVE_STDLIB_H=1 -DHAVE_STRERROR_H=1 -DHAVE_STRING_H=1 -DSUPPORT_JIT=1 -DSUPPORT_PCRE2_16=1 -DSUPPORT_UNICODE=1
   include-dirs:
       src/c
       src/c/pcre2/src
