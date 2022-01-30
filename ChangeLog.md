@@ -1,5 +1,8 @@
 # Changelog and Acknowledgements
 
+## 2.0.5
+* Enabled PCRE2's built-in Unicode support.
+
 ## 2.0.4
 * Added `Show` instance for `Captures` to ease debugging user code.
 
