@@ -1,14 +1,15 @@
 # Changelog and Acknowledgements
 
 ## 2.0.5
-* Enabled PCRE2's built-in Unicode support.
+* Enabled PCRE2's built-in Unicode support, which fixes
+  [#21](https://github.com/sjshuck/hs-pcre2/issues/21).
 
 ## 2.0.4
 * Added `Show` instance for `Captures` to ease debugging user code.
 
 ## 2.0.3
 * Updated PCRE2 to 10.39 (no API changes).  The C sources are now drawn from
-  https://github.com/PhilipHazel/pcre2.git, which fixes
+  https://github.com/PhilipHazel/pcre2, which fixes
   [#10](https://github.com/sjshuck/hs-pcre2/issues/10).
 
 ## 2.0.2
