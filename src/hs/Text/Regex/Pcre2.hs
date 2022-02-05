@@ -250,10 +250,12 @@ module Text.Regex.Pcre2 (
     -- |                    | other type-level data powering        | parenthesized captures       |
     -- |                    | compile-time capture lookups          |                              |
     -- +--------------------+---------------------------------------+------------------------------+
-    -- | @QuasiQuotes@      | @[@/f/@|@...@|]@ syntax               | Always                       |
+    -- | @QuasiQuotes@      | @[@/f/@|@...@|]@ syntax               | Using `regex`\/`_regex`      |
     -- +--------------------+---------------------------------------+------------------------------+
-    -- | @TypeApplications@ | @\@i@ syntax for supplying type index | Using `capture`\/`_capture`  |
-    -- |                    | arguments to applicable functions     |                              |
+    -- | @TypeApplications@ | @\@i@ syntax for supplying type index | Using `regex`\/`_regex` with |
+    -- |                    | arguments to applicable functions     | a pattern containing         |
+    -- |                    |                                       | parenthesized captures;      |
+    -- |                    |                                       | using `capture`\/`_capture`  |
     -- +--------------------+---------------------------------------+------------------------------+
     -- | @ViewPatterns@     | Running code and binding variables in | Using `regex` as a Haskell   |
     -- |                    | pattern context proper (pattern       | pattern                      |

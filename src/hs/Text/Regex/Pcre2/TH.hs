@@ -56,12 +56,6 @@ newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
 -- numbers.
 type CapturesInfo = (Nat, [(Symbol, Nat)])
 
--- | Helper for constructing an empty lookup table.  If we splice `promotedNilT`
--- directly, we would have to require the user to turn on either
--- @KindSignatures@ or @PolyKinds@; GHC seems to monokind @'[]@ as @[*]@,
--- instead of unifying it with the list inside `CapturesInfo`.
-type NoNamedCaptures = '[] :: [(Symbol, Nat)]
-
 -- | Look up the number of a capture at compile time, either by number or by
 -- name.  Throw a helpful 'TypeError' if the index doesn\'t exist.
 type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
@@ -182,10 +176,7 @@ capturesInfoQ s = predictCaptureNamesQ s >>= \case
         -- 5
         hiQ = litT $ numTyLit $ fromIntegral $ length captureNames
         -- '[ '("foo", 1), '("bar", 4)]
-        kvsQ = case toKVs captureNames of
-            -- We can't splice '[] because it doesn't kind-check.  See above.
-            []  -> [t| NoNamedCaptures |]
-            kvs -> foldr f promotedNilT kvs
+        kvsQ = foldr f promotedNilT $ toKVs captureNames
         -- '("foo", 1) ': ...
         f (number, name) r = promotedConsT `appT` kvQ `appT` r where
             kvQ = promotedTupleT 2                           -- '(,)
@@ -197,8 +188,9 @@ matchTH :: (Alternative f) => Text -> Text -> f Text
 matchTH patt = toAlternativeOf $ _matchTH patt
 
 -- | Helper for `regex` with parenthesized captures.
-capturesTH :: (Alternative f) => Text -> Proxy info -> Text -> f (Captures info)
-capturesTH patt proxy = toAlternativeOf $ _capturesTH patt proxy
+capturesTH :: forall info f. (Alternative f) =>
+    Text -> Text -> f (Captures info)
+capturesTH patt = toAlternativeOf $ _capturesTH patt
 
 -- | Helper for `regex` as a guard pattern.
 matchesTH :: Text -> Text -> Bool
@@ -214,8 +206,8 @@ _matchTH :: Text -> Traversal' Text Text
 _matchTH patt = _gcaptures (memoMatcher patt) get0thSlice . _Identity
 
 -- | Helper for `_regex` with parenthesized captures.
-_capturesTH :: Text -> Proxy info -> Traversal' Text (Captures info)
-_capturesTH patt _ = _gcaptures (memoMatcher patt) getAllSlices . captured where
+_capturesTH :: Text -> Traversal' Text (Captures info)
+_capturesTH patt = _gcaptures (memoMatcher patt) getAllSlices . captured where
     captured f cs = f (Captures cs) <&> \(Captures cs') -> cs'
 
 -- | === As an expression
@@ -259,11 +251,11 @@ _capturesTH patt _ = _gcaptures (memoMatcher patt) getAllSlices . captured where
 -- If there are no named captures, this simply acts as a guard.
 regex :: QuasiQuoter
 regex = QuasiQuoter{
-    quoteExp = \s -> capturesInfoQ s >>= \case
-        Nothing   -> [e| matchTH (Text.pack $(stringE s)) |]
-        Just info -> [e| capturesTH
-            (Text.pack $(stringE s))
-            (Proxy :: Proxy $(return info)) |],
+    quoteExp = \s -> do
+        let regexQ = capturesInfoQ s >>= \case
+                Nothing   -> [e| matchTH |]
+                Just info -> [e| capturesTH |] `appTypeE` return info
+        regexQ `appE` [e| Text.pack $(stringE s) |],
 
     quotePat = \s -> do
         captureNames <- predictCaptureNamesQ s
@@ -308,11 +300,11 @@ regex = QuasiQuoter{
 -- > -- There are 15 competing standards
 _regex :: QuasiQuoter
 _regex = QuasiQuoter{
-    quoteExp = \s -> capturesInfoQ s >>= \case
-        Nothing   -> [e| _matchTH (Text.pack $(stringE s)) |]
-        Just info -> [e| _capturesTH
-            (Text.pack $(stringE s))
-            (Proxy :: Proxy $(return info)) |],
+    quoteExp = \s -> do
+        let _regexQ = capturesInfoQ s >>= \case
+                Nothing   -> [e| _matchTH |]
+                Just info -> [e| _capturesTH |] `appTypeE` return info
+        _regexQ `appE` [e| Text.pack $(stringE s) |],
 
     quotePat = const $ fail "_regex: cannot produce a pattern",
 
