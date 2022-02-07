@@ -5,7 +5,7 @@ cabal-version: 1.12
 -- see: https://github.com/sol/hpack
 
 name:           pcre2
-version:        2.0.5
+version:        2.1.0
 synopsis:       Regular expressions via the PCRE2 C library (included)
 description:    Please see the README on GitHub at <https://github.com/sjshuck/hs-pcre2>
 category:       Text
@@ -13,7 +13,7 @@ homepage:       https://github.com/sjshuck/hs-pcre2#readme
 bug-reports:    https://github.com/sjshuck/hs-pcre2/issues
 author:         Shlomo Shuck and contributors
 maintainer:     stevenjshuck@gmail.com
-copyright:      2020-2021 Shlomo Shuck
+copyright:      2020-2022 Shlomo Shuck
 license:        Apache-2.0
 license-file:   LICENSE
 build-type:     Simple

@@ -1,5 +1,13 @@
 # Changelog and Acknowledgements
 
+## 2.1.0
+* Replaced `Proxy :: Proxy info` with type applications in splices from
+  `regex`/`_regex`.  This significantly shortens the splices, producing nicer
+  error messages.  As a very minor consequence, we now require the user to turn
+  on `{-# LANGUAGE TypeApplications #-}` when using `regex`/`_regex` with
+  patterns with parenthesized captures, even when not using
+  `capture`/`_capture`.
+
 ## 2.0.5
 * Enabled PCRE2's built-in Unicode support, which fixes
   [#21](https://github.com/sjshuck/hs-pcre2/issues/21).
