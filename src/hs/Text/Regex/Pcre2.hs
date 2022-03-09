@@ -34,7 +34,7 @@ module Text.Regex.Pcre2 (
     exceptions are typed (as `SomePcre2Exception`s); moreover, we offer Template
     Haskell facilities that can intercept some of these errors before the
     program is run.  (Failure to match is not considered a user error and is
-    represented in the types.)
+    represented by `Control.Applicative.empty`; see below.)
 
     [There's more than one way to do it](https://en.wikipedia.org/wiki/There's_more_than_one_way_to_do_it)
     with this library.  The choices between functions and traversals,
@@ -154,11 +154,6 @@ module Text.Regex.Pcre2 (
     >>> :set -XTypeApplications
     >>> handle @SomePcre2Exception (\_ -> return Nothing) $ evaluate $ broken "foo"
     Nothing
-
-    Or simply select `IO` as the `Control.Applicative.Alternative` instance:
-
-    >>> handle @SomePcre2Exception (\_ -> return "broken") $ broken "foo"
-    "broken"
     -}
 
     -- ** Basic matching functions
