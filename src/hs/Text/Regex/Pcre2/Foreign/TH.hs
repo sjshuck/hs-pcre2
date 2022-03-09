@@ -18,7 +18,7 @@ constant typeName suffix = return [dec] where
 
 {-
     For example,
-getter "callout_block" ''CUInt "version"
+getter "callout_block" [t| CUInt |] "version"
     will produce
 foreign import capi unsafe "getters.h" pcre2_callout_block_version
     :: Ptr Pcre2_callout_block

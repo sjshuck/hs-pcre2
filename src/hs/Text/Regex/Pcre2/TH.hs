@@ -46,18 +46,18 @@ import           Text.Regex.Pcre2.Internal
 -- explicitly in a type signature is not supported&#x2014;the definition of
 -- `CapturesInfo` is not part of the public API and may change without warning.
 --
--- After obtaining `Captures` it\'s recommended to immediately consume them and
+-- After obtaining `Captures` it's recommended to immediately consume them and
 -- transform them into application-level data, to avoid leaking the types.
 newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
     deriving (Show {- ^ @since 2.0.4 -})
 
--- | The kind of `Captures`\'s @info@.  The first number is the total number of
+-- | The kind of `Captures`'s @info@.  The first number is the total number of
 -- parenthesized captures, and the list is a lookup table from capture names to
 -- numbers.
 type CapturesInfo = (Nat, [(Symbol, Nat)])
 
 -- | Look up the number of a capture at compile time, either by number or by
--- name.  Throw a helpful 'TypeError' if the index doesn\'t exist.
+-- name.  Throw a helpful 'TypeError' if the index doesn't exist.
 type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
     CaptNum (num :: Nat) '(hi, _) = If (num `CmpNat` hi == 'GT)
         -- then
@@ -79,7 +79,7 @@ type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
 -- The ugly type signature may be interpreted like this:  /Given some capture/
 -- /group index @i@ and some @info@ about a regex, ensure that index exists and/
 -- /is resolved to the number @num@ at compile time.  Then, at runtime, get a/
--- /capture group from a list of captures./
+-- /capture group (numbered @num@) from a list of (at least @num@) captures./
 --
 -- In practice the variable @i@ is specified by type application and the other
 -- variables are inferred.
@@ -98,7 +98,7 @@ _capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
 _capture = _Captures . singular (ix $ fromInteger $ natVal @num Proxy) where
     _Captures f (Captures cs) = Captures <$> f cs
 
--- | Unexported, top-level `IORef` that\'s created upon the first runtime
+-- | Unexported, top-level `IORef` that's created upon the first runtime
 -- evaluation of a Template Haskell `Matcher`.
 globalMatcherCache :: IORef (Map Text Matcher)
 globalMatcherCache = unsafePerformIO $ newIORef Map.empty
@@ -114,8 +114,7 @@ memoMatcher patt = unsafePerformIO $ do
             let matcher = pureUserMatcher mempty patt
             in (Map.insert patt matcher cache, matcher)
 
--- | From options and pattern, determine parenthesized captures\' names in
--- order.
+-- | From options and pattern, determine parenthesized captures' names in order.
 predictCaptureNames :: Option -> Text -> IO [Maybe Text]
 predictCaptureNames option patt = do
     code <- evalStateT
@@ -124,7 +123,7 @@ predictCaptureNames option patt = do
 
     withForeignPtr code getCaptureNames
 
--- | Get parenthesized captures\' names in order.
+-- | Get parenthesized captures' names in order.
 getCaptureNames :: Ptr Pcre2_code -> IO [Maybe Text]
 getCaptureNames codePtr = do
     nameCount <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMECOUNT
@@ -281,7 +280,8 @@ regex = QuasiQuoter{
 
     quoteDec = const $ fail "regex: cannot produce declarations"}
 
--- | An optical variant of `regex`.  Can only be used as an expression.
+-- | An optical variant of `regex`\/a type-annotated variant of `_captures`. Can
+-- only be used as an expression.
 --
 -- @
 -- _regex :: String -> `Traversal'` Text (`Captures` info)

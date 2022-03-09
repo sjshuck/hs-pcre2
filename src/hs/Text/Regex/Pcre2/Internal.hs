@@ -56,7 +56,7 @@ mkFunPtr anchor create = do
 bitOr :: (Foldable t, Bits a) => t a -> a
 bitOr = foldl' (.|.) zeroBits
 
--- | Like `lines`, but don\'t remove any characters.
+-- | Like `lines`, but don't remove any characters.
 unchompedLines :: String -> [String]
 unchompedLines s = case break (== '\n') s of
     (line,     _ : rest) -> (line ++ "\n") : unchompedLines rest
@@ -102,7 +102,7 @@ maybeThinSlice text (Slice off offEnd)
         & Text.takeWord16 offEnd
         & Text.dropWord16 off
 
--- | Slice a 'Text', copying if it\'s less than half of the original.  Note this
+-- | Slice a 'Text', copying if it's less than half of the original.  Note this
 -- is a lazy, pure operation.
 smartSlice :: Text -> Slice -> Text
 smartSlice text slice = fromMaybe Text.empty $ maybeSmartSlice text slice
@@ -205,8 +205,8 @@ type Subber = Text -> IO (CInt, Text)
 -- the behavior of regex compilation and execution.
 --
 -- All library functions that take options have the suffix @Opt@ in their names;
--- for each of them, there\'s also a non-@Opt@ convenience function that simply
--- has the (unexported) `mempty` option.  For many uses, options won\'t be
+-- for each of them, there's also a non-@Opt@ convenience function that simply
+-- has the (unexported) `mempty` option.  For many uses, options won't be
 -- needed.
 --
 -- Some options can be enabled by special character sequences in the pattern as
@@ -236,13 +236,13 @@ data Option
     -- @(*MARK:L\\(O\\)L)@.
     | Anchored -- ^ Equivalent to beginning pattern with @^@.
     | BadEscapeIsLiteral -- ^ Do not throw an error for unrecognized or
-    -- malformed escapes.  /\"This is a dangerous option.\"/
+    -- malformed escapes.  /"This is a dangerous option."/
     | Bsr Bsr -- ^ Override what @\\R@ matches (default given by `defaultBsr`).
     | Caseless -- ^ Case-insensitive match.  Equivalent to @(?i)@.
     | DepthLimit Word32 -- ^ Override maximum depth of nested backtracking
     -- (default given by `defaultDepthLimit`).  Equivalent to
     -- @(*LIMIT_DEPTH=@/number/@)@.
-    | DollarEndOnly -- ^ Don\'t match @$@ with a newline at the end of the
+    | DollarEndOnly -- ^ Don't match @$@ with a newline at the end of the
     -- subject.
     | DotAll -- ^ A dot also matches a (single-character) newline.  Equivalent
     -- to @(?s)@.
@@ -257,7 +257,7 @@ data Option
     -- hold backtracking information (default given by `defaultHeapLimit`).
     -- Equivalent to @(*LIMIT_HEAP=@/number/@)@.
     | Literal -- ^ Treat the pattern as a literal string.
-    | MatchLimit Word32 -- ^ Override maximum value of the main matching loop\'s
+    | MatchLimit Word32 -- ^ Override maximum value of the main matching loop's
     -- internal counter (default given by `defaultMatchLimit`), as a simple CPU
     -- throttle.  Equivalent to @(*LIMIT_MATCH=@/number/@)@.
     | MatchLine -- ^ Only match complete lines.  Equivalent to bracketing the
@@ -268,10 +268,10 @@ data Option
     -- beginning and end.  Equivalent to bracketing the pattern with
     -- @\\b(?:@/pattern/@)\\b@.
     | MaxPatternLength Word64 -- ^ Default is `maxBound`.
-    | Multiline -- ^ @^@ and @$@ mean \"beginning\/end of a line\" rather than
-    -- \"beginning\/end of the subject\".  Equivalent to @(?m)@.
+    | Multiline -- ^ @^@ and @$@ mean "beginning\/end of a line" rather than
+    -- "beginning\/end of the subject".  Equivalent to @(?m)@.
     | NeverBackslashC -- ^ Do not allow the unsafe @\\C@ sequence.
-    | NeverUcp -- ^ Don\'t count Unicode characters in some character classes
+    | NeverUcp -- ^ Don't count Unicode characters in some character classes
     -- such as @\\d@.  Overrides @(*UCP)@.
     | Newline Newline -- ^ Override what a newline is (default given by
     -- `defaultNewline`).  Equivalent to @(*CRLF)@ or similar.
@@ -284,8 +284,8 @@ data Option
     -- beginning of a pattern.
     | NotBol -- ^ First character of subject is not the __b__eginning __o__f
     -- __l__ine.  Only affects @^@.
-    | NotEmpty -- ^ The 0th capture doesn\'t match if it would be empty.
-    | NotEmptyAtStart -- ^ The 0th capture doesn\'t match if it would be empty
+    | NotEmpty -- ^ The 0th capture doesn't match if it would be empty.
+    | NotEmptyAtStart -- ^ The 0th capture doesn't match if it would be empty
     -- and at the beginning of the subject.
     | NotEol -- ^ End of subject is not the __e__nd __o__f __l__ine.  Only
     -- affects @$@.
@@ -308,9 +308,9 @@ data Option
     -- replacement instead of it within the subject.  With `SubGlobal`, all
     -- results are concatenated.
     | SubUnknownUnset -- ^ /Affects `subOpt`./  References in the replacement to
-    -- non-existent captures don\'t error but are treated as unset.
+    -- non-existent captures don't error but are treated as unset.
     | SubUnsetEmpty -- ^ /Affects `subOpt`./  References in the replacement to
-    -- unset captures don\'t error but are treated as empty.
+    -- unset captures don't error but are treated as empty.
     | Ucp -- ^ Count Unicode characters in some character classes such as @\\d@.
     -- Incompatible with `NeverUcp`.
     | Ungreedy -- ^ Invert the effect of @?@.  Without it, quantifiers are
@@ -360,7 +360,7 @@ bsrToC :: Bsr -> CUInt
 bsrToC BsrUnicode = pcre2_BSR_UNICODE
 bsrToC BsrAnyCrlf = pcre2_BSR_ANYCRLF
 
--- | What\'s considered a newline.
+-- | What's considered a newline.
 data Newline
     = NewlineCr      -- ^ @\\r@ only
     | NewlineLf      -- ^ @\\n@ only
@@ -393,7 +393,7 @@ newlineToC NewlineNul     = pcre2_NEWLINE_NUL
 -- | Input for user-defined callouts.
 data CalloutInfo
     = CalloutInfo{
-        -- | The index of which callout point we\'re on.
+        -- | The index of which callout point we're on.
         calloutIndex :: CalloutIndex,
         -- | The captures that have been set so far.
         calloutCaptures :: NonEmpty (Maybe Text),
@@ -429,8 +429,8 @@ data CalloutResult
 -- | Input for user-defined substitution callouts.
 data SubCalloutInfo
     = SubCalloutInfo{
-        -- | The 1-based index of which substitution we\'re on.  Only goes past
-        -- 1 during global substitutions.
+        -- | The 1-based index of which substitution we're on.  Only goes past 1
+        -- during global substitutions.
         subCalloutSubsCount :: Int,
         -- | The captures that have been set so far.
         subCalloutCaptures :: NonEmpty (Maybe Text),
@@ -541,7 +541,7 @@ applyOption = \case
     unary ctor f x = [ctor $ \ctx -> withForeignPtr ctx applyAndCheck] where
         applyAndCheck ctxPtr = f ctxPtr x >>= check (== 0)
 
--- | Intermediate representation of options expressing what effect they\'ll have
+-- | Intermediate representation of options expressing what effect they'll have
 -- on which stage of regex compilation\/execution.  Also provide fake @Prism'@s.
 data AppliedOption
     = CompileOption !CUInt
@@ -1040,7 +1040,7 @@ _gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
 
 -- | A function that takes a C match result and extracts captures into a
 -- container.  We need to pass this effectful callback to `_gcaptures` because
--- of the latter\'s imperative loop that reuses the same @pcre2_match_data@
+-- of the latter's imperative loop that reuses the same @pcre2_match_data@
 -- block.
 --
 -- The container type is polymorphic and in practice carries a `Traversable`
@@ -1056,7 +1056,7 @@ _gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
 --   Template Haskell-generated @ViewPatterns@.
 type FromMatch t = Ptr Pcre2_match_data -> IO (t Slice)
 
--- | Read all specifically indexed captures\' offsets from match results.
+-- | Read all specifically indexed captures' offsets from match results.
 getWhitelistedSlices :: (Traversable t) => t Int -> FromMatch t
 getWhitelistedSlices whitelist matchDataPtr = do
     ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
@@ -1067,11 +1067,11 @@ getWhitelistedSlices whitelist matchDataPtr = do
         <$> peekOvec (i * 2)
         <*> peekOvec (i * 2 + 1)
 
--- | Read just the 0th capture\'s offsets from match results.
+-- | Read just the 0th capture's offsets from match results.
 get0thSlice :: FromMatch Identity
 get0thSlice = getWhitelistedSlices $ Identity 0
 
--- | Read all captures\' offsets from match results.
+-- | Read all captures' offsets from match results.
 getAllSlices :: FromMatch NonEmpty
 getAllSlices matchDataPtr = do
     count <- fromIntegral <$> pcre2_get_ovector_count matchDataPtr
@@ -1157,7 +1157,7 @@ subOpt option patt replacement =
 --
 -- Substitution works in the following way:  If a capture is set such that the
 -- new `Text` is not equal to the old one, a substitution occurs, otherwise it
--- doesn\'t.  This matters in cases where a capture encloses another
+-- doesn't.  This matters in cases where a capture encloses another
 -- capture&#x2014;notably, /all/ parenthesized captures are enclosed by the 0th.
 --
 -- >>> threeAndMiddle = _captures ". (.) ."
@@ -1166,7 +1166,7 @@ subOpt option patt replacement =
 -- >>> "A A A" & threeAndMiddle .~ "A B A" :| ["A"]
 -- "A B A"
 --
--- Changing multiple overlapping captures won\'t do what you want and is
+-- Changing multiple overlapping captures won't do what you want and is
 -- unsupported.
 --
 -- Changing an unset capture is unsupported because the PCRE2 match API does not
@@ -1175,7 +1175,7 @@ subOpt option patt replacement =
 -- `SubUnknownUnset` and `SubUnsetEmpty`.)
 --
 -- If the list becomes longer for some reason, the extra elements are ignored.
--- If it\'s shortened, the absent elements are considered to be unchanged.
+-- If it's shortened, the absent elements are considered to be unchanged.
 --
 -- It's recommended that the list be modified capture-wise, using `ix`.
 --
@@ -1198,7 +1198,7 @@ _capturesOpt option patt = _gcaptures (pureUserMatcher option patt) getAllSlices
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
 -- a subject to the non-overlapping portions of it that match.
 --
--- @_match = `_captures` patt . ix 0@
+-- Equivalent to @`_captures` patt . `ix` 0@, but more efficient.
 _match :: Text -> Traversal' Text Text
 _match = _matchOpt mempty
 
@@ -1333,7 +1333,7 @@ defaultIsNeverBackslashC = getConfigNumeric pcre2_CONFIG_NEVER_BACKSLASH_C == 1
 defaultParensLimit :: Int
 defaultParensLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_PARENSLIMIT
 
--- | Size in bytes of PCRE2\'s built-in character processing tables.
+-- | Size in bytes of PCRE2's built-in character processing tables.
 defaultTablesLength :: Int
 defaultTablesLength = fromIntegral $ getConfigNumeric pcre2_CONFIG_TABLES_LENGTH
 

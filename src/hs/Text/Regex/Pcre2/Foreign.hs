@@ -15,16 +15,16 @@ import Text.Regex.Pcre2.Foreign.TH (constant, getter)
 
 -- * Types
 
--- | \"The @UCHAR@ types define unsigned code units of the appropriate widths.
--- For example, @PCRE2_UCHAR16@ is usually defined as @uint16_t@.\"
+-- | "The @UCHAR@ types define unsigned code units of the appropriate widths.
+-- For example, @PCRE2_UCHAR16@ is usually defined as @uint16_t@."
 type PCRE2_UCHAR = CUShort
 
--- | \"The @SPTR@ types are constant pointers to the equivalent @UCHAR@ types,
--- that is, they are pointers to vectors of unsigned code units.\"
+-- | "The @SPTR@ types are constant pointers to the equivalent @UCHAR@ types,
+-- that is, they are pointers to vectors of unsigned code units."
 type PCRE2_SPTR = Ptr PCRE2_UCHAR
 
--- | \"...string lengths and offsets into strings of code units...are always of
--- type @PCRE2_SIZE@...currently always defined as @size_t@.\"
+-- | "...string lengths and offsets into strings of code units...are always of
+-- type @PCRE2_SIZE@...currently always defined as @size_t@."
 type PCRE2_SIZE = CSize
 
 -- ** Opaque types
@@ -92,7 +92,7 @@ foreign import capi unsafe "pcre2.h" pcre2_set_character_tables
 
 foreign import capi unsafe "pcre2.h" pcre2_set_compile_extra_options
     :: Ptr Pcre2_compile_context
-    -> CUInt -- ^ See \"Extra compile options\" below for possible bit flags.
+    -> CUInt -- ^ See "Extra compile options" below for possible bit flags.
     -> IO CInt
 
 foreign import capi unsafe "pcre2.h" pcre2_set_max_pattern_length
@@ -203,7 +203,7 @@ foreign import capi safe "pcre2.h" pcre2_compile
     :: PCRE2_SPTR
     -> PCRE2_SIZE -- ^ Can be zero-terminated.  See below.
     -> CUInt
-    -- ^ See \"Main compile options\" below for possible bit flags.
+    -- ^ See "Main compile options" below for possible bit flags.
     -> Ptr CInt
     -> Ptr PCRE2_SIZE
     -> Ptr Pcre2_compile_context
@@ -475,11 +475,11 @@ constant ''CInt "ERROR_NOMEMORY"
 constant ''CInt "ERROR_NULL"
 -- *** UTF-16-specific errors
 --
--- | \"Missing low surrogate at end of string\"
+-- | "Missing low surrogate at end of string"
 constant ''CInt "ERROR_UTF16_ERR1"
--- | \"Invalid low surrogate follows high surrogate\"
+-- | "Invalid low surrogate follows high surrogate"
 constant ''CInt "ERROR_UTF16_ERR2"
--- | \"Isolated low surrogate\"
+-- | "Isolated low surrogate"
 constant ''CInt "ERROR_UTF16_ERR3"
 
 -- * DFA matching

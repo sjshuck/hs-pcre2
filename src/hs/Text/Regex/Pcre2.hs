@@ -26,7 +26,7 @@ module Text.Regex.Pcre2 (
     Likewise, we do not require the user to know whether a PCRE2 option is to be
     applied at pattern compile time or match time.  Instead we fold all possible
     options into a single datatype, `Option`.  Most functions have vanilla and
-    configurable variants; the latter have \"@Opt@\" in the name and accept a
+    configurable variants; the latter have "@Opt@" in the name and accept a
     value of this type.
 
     Similar to how @head :: [a] -> a@ sacrifices totality for type simplicity,
@@ -40,9 +40,9 @@ module Text.Regex.Pcre2 (
     with this library.  The choices between functions and traversals,
     poly-kinded `Captures` and plain lists, string literals and
     quasi-quotations, quasi-quoted expressions and quasi-quoted patterns...these
-    are left to the user.  She will observe that advanced features\' extra
+    are left to the user.  She will observe that advanced features' extra
     safety, power, and convenience entail additional language extensions,
-    cognitive overhead, and (for lenses) library dependencies, so it\'s really a
+    cognitive overhead, and (for lenses) library dependencies, so it's really a
     matter of finding the best trade-offs for her case.
 
     === __Definitions__
@@ -55,8 +55,8 @@ module Text.Regex.Pcre2 (
     [Regex]:  A function of the form @`Data.Text.Text` -> result@, where the
     argument is the subject.  It is \"compiled\" via partial application as
     discussed above.  (Lens users:  A regex has the more abstract form
-    @[Traversal\'](https://hackage.haskell.org/package/microlens/docs/Lens-Micro.html#t:Traversal-39-)
-    `Data.Text.Text` result@, but the concept is the same.)
+    @`Lens.Micro.Traversal'` `Data.Text.Text` result@, but the concept is the
+    same.)
 
     [Capture (or capture group)]:  Any substrings of the subject matched by the
     pattern, meaning the whole pattern and any parenthesized groupings.  The
@@ -80,7 +80,7 @@ module Text.Regex.Pcre2 (
 
     Each API function is designed such that, when a regex is obtained, the
     underlying C data generated from the pattern and any options is reused for
-    that regex\'s lifetime.  Care should be taken that the same regex is not
+    that regex's lifetime.  Care should be taken that the same regex is not
     recreated /ex nihilo/ and discarded for each new subject:
 
     > isEmptyOrHas2Digits :: Text -> Bool
@@ -100,7 +100,7 @@ module Text.Regex.Pcre2 (
     Note: Template Haskell regexes are immune from this problem and may be
     freely inlined; see below.
 
-    Also of note is the optimization that, for each capture that\'s more than
+    Also of note is the optimization that, for each capture that's more than
     half the length of the subject, a zero-copy `Data.Text.Text` is produced in
     constant time and space.  This can yield a large performance boost in many
     cases, for example when splitting lines into key-value pairs as in
@@ -222,7 +222,7 @@ module Text.Regex.Pcre2 (
     --
     -- * out-of-bounds indexing of a capture group list /(runtime error)/
     --
-    -- * out-of-bounds @ix@ing of a @Traversal\'@ target
+    -- * out-of-bounds `Lens.Micro.ix`ing of a `Lens.Micro.Traversal'` target
     -- /(spurious failure to match)/
     --
     -- * case expression containing a Haskell list pattern of the wrong length
