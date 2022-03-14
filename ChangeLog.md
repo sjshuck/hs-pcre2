@@ -1,5 +1,9 @@
 # Changelog and Acknowledgements
 
+## 2.1.0.1
+* Explicitly required `text` < 2.
+* Minor docs adjustments.
+
 ## 2.1.0
 * Replaced `Proxy :: Proxy info` with type applications in splices from
   `regex`/`_regex`.  This significantly shortens the splices, producing nicer

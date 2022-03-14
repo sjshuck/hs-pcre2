@@ -84,4 +84,4 @@ forMOf kv'd file $ execStateT $ do
 PCRE2 is distributed under the [3-clause BSD](https://www.pcre.org/licence.txt) license.
 
 ## Main Author
-&copy;2020&ndash;2021 Shlomo Shuck
+&copy;2020&ndash;2022 Shlomo Shuck

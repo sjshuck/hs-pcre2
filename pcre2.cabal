@@ -5,7 +5,7 @@ cabal-version: 1.12
 -- see: https://github.com/sol/hpack
 
 name:           pcre2
-version:        2.1.0
+version:        2.1.0.1
 synopsis:       Regular expressions via the PCRE2 C library (included)
 description:    Please see the README on GitHub at <https://github.com/sjshuck/hs-pcre2>
 category:       Text
@@ -147,7 +147,7 @@ library
     , microlens
     , mtl
     , template-haskell
-    , text
+    , text <2
   default-language: Haskell2010
 
 test-suite pcre2-test
@@ -167,7 +167,7 @@ test-suite pcre2-test
     , mtl
     , pcre2
     , template-haskell
-    , text
+    , text <2
   default-language: Haskell2010
 
 benchmark pcre2-benchmarks
@@ -189,5 +189,5 @@ benchmark pcre2-benchmarks
     , pcre2
     , regex-pcre-builtin
     , template-haskell
-    , text
+    , text <2
   default-language: Haskell2010
