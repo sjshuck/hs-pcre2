@@ -17,7 +17,7 @@ import Text.Regex.Pcre2.Foreign.TH (constant, getter)
 
 -- | "The @UCHAR@ types define unsigned code units of the appropriate widths.
 -- For example, @PCRE2_UCHAR16@ is usually defined as @uint16_t@."
-type PCRE2_UCHAR = CUShort
+type PCRE2_UCHAR = CUChar
 
 -- | "The @SPTR@ types are constant pointers to the equivalent @UCHAR@ types,
 -- that is, they are pointers to vectors of unsigned code units."

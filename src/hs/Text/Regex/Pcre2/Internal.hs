@@ -28,7 +28,7 @@ import qualified Data.Text.Foreign          as Text
 import           Data.Typeable              (cast)
 import           Data.Void                  (Void, absurd)
 import           Foreign
-import           Foreign.C.Types            (CInt(..), CUInt(..), CUShort)
+import           Foreign.C.Types            (CInt(..), CUInt(..), CUChar)
 import qualified Foreign.Concurrent         as Conc
 import           Lens.Micro
 import           Lens.Micro.Extras          (preview, view)
@@ -88,8 +88,8 @@ fix3 x y z f = fix f x y z
 -- ** Fast @Text@ slicing
 
 data Slice = Slice
-    {-# UNPACK #-} !Text.I16
-    {-# UNPACK #-} !Text.I16
+    {-# UNPACK #-} !Text.I8
+    {-# UNPACK #-} !Text.I8
 
 -- | Zero-copy slice a 'Text'.  An unset capture is represented by a
 -- `pcre2_UNSET` range and is interpreted in this library as `Text.empty`.
@@ -101,8 +101,8 @@ maybeThinSlice :: Text -> Slice -> Maybe Text
 maybeThinSlice text (Slice off offEnd)
     | off == fromIntegral pcre2_UNSET = Nothing
     | otherwise                       = Just $ text
-        & Text.takeWord16 offEnd
-        & Text.dropWord16 off
+        & Text.takeWord8 offEnd
+        & Text.dropWord8 off
 
 -- | Slice a 'Text', copying if it's less than half of the original.  Note this
 -- is a lazy, pure operation.
@@ -118,11 +118,11 @@ maybeSmartSlice text slice = f <$!> maybeThinSlice text slice where
         | otherwise                                        = Text.copy substring
 
 -- | Safe, type-restricted `castPtr`.
-fromCUs :: Ptr CUShort -> Ptr Word16
+fromCUs :: Ptr CUChar -> Ptr Word8
 fromCUs = castPtr
 
 -- | Safe, type-restricted `castPtr`.
-toCUs :: Ptr Word16 -> Ptr CUShort
+toCUs :: Ptr Word8 -> Ptr CUChar
 toCUs = castPtr
 
 -- ** Lens utilities
@@ -956,12 +956,7 @@ getCalloutInfo calloutSubject blockPtr = do
         if ptr == nullPtr
             then return Nothing
             else Just <$> do
-                -- TODO Replace this with a more obviously best way to slurp a
-                -- zero-terminated region of memory into a `Text`, given
-                -- whatever the pcre2callout spec means by "zero-terminated".
-                len <- fix1 0 $ \continue off -> peekElemOff ptr off >>= \case
-                    0 -> return off
-                    _ -> continue $ off + 1
+                len <- lengthArray0 0 ptr
                 Text.fromPtr (fromCUs ptr) (fromIntegral len)
 
     flags <- pcre2_callout_block_callout_flags blockPtr
@@ -1062,7 +1057,7 @@ type FromMatch t = Ptr Pcre2_match_data -> IO (t Slice)
 getWhitelistedSlices :: (Traversable t) => t Int -> FromMatch t
 getWhitelistedSlices whitelist matchDataPtr = do
     ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
-    let peekOvec :: Int -> IO Text.I16
+    let peekOvec :: Int -> IO Text.I8
         peekOvec = fmap fromIntegral . peekElemOff ovecPtr
 
     forM whitelist $ \i -> Slice
@@ -1259,7 +1254,7 @@ instance Exception Pcre2CompileException where
 getErrorMessage :: CInt -> Text
 getErrorMessage errorCode = unsafePerformIO $ do
     let bufCUs = 120
-    allocaBytes (bufCUs * 2) $ \bufPtr -> do
+    allocaArray bufCUs $ \bufPtr -> do
         cus <- pcre2_get_error_message errorCode bufPtr (fromIntegral bufCUs)
         Text.fromPtr (fromCUs bufPtr) (fromIntegral cus)
 
@@ -1283,6 +1278,7 @@ getConfigString what = unsafePerformIO $ do
     if len == pcre2_ERROR_BADOPTION
         then return Nothing
         -- FIXME Do we really need "+ 1" here?
+        -- FIXME allocaBytes looks wrong
         else allocaBytes (fromIntegral (len + 1) * 2) $ \ptr -> do
             pcre2_config what ptr
             Just <$> Text.fromPtr ptr (fromIntegral len - 1)

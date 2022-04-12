@@ -27,7 +27,7 @@ import qualified Data.Text.Foreign          as Text
 import           Data.Type.Bool             (If)
 import           Data.Type.Equality         (type (==))
 import           Foreign
-import           Foreign.C                  (CUInt)
+import           Foreign.C                  (CUInt, CUChar)
 import           GHC.TypeLits               hiding (Text)
 import qualified GHC.TypeLits               as TypeLits
 import           Language.Haskell.TH
@@ -135,13 +135,16 @@ getCaptureNames codePtr = do
     let indexes = takeWhile (< nameCount) [0 ..]
     names <- fmap IM.fromList $ forM indexes $ \i -> do
         let entryPtr = nameTable `advancePtr` fromIntegral (i * nameEntrySize)
-            groupNamePtr = entryPtr `advancePtr` 1
-        groupNumber <- peek entryPtr
+            groupNamePtr = entryPtr `advancePtr` 2
+        groupNumber <- do
+            [hi, lo] <- forM [0, 1] $ \off ->
+                fromIntegral @CUChar <$> peekByteOff entryPtr off
+            return $ hi `shiftL` 8 + lo
         groupNameLen <- lengthArray0 0 groupNamePtr
         groupName <- Text.fromPtr
             (fromCUs groupNamePtr)
             (fromIntegral groupNameLen)
-        return (fromIntegral groupNumber, groupName)
+        return (groupNumber, groupName)
 
     hiCaptNum <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
 

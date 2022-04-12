@@ -12,6 +12,13 @@ packages:
   original:
     hackage: exceptions-0.10.5
 - completed:
+    hackage: hashable-1.4.0.2@sha256:0cddd0229d1aac305ea0404409c0bbfab81f075817bd74b8b2929eff58333e55,5005
+    pantry-tree:
+      size: 1248
+      sha256: 51dda0aa70849588d074125f324beba1c8736cfa486e7f4a90a798b1d0e6019d
+  original:
+    hackage: hashable-1.4.0.2
+- completed:
     hackage: microlens-0.4.13.0@sha256:40794f266977558e1138ac034701fa3ff66518bc4ca6a1fba5c575d4157cf0ba,4573
     pantry-tree:
       size: 461
@@ -67,6 +74,13 @@ packages:
       sha256: 3ddc60975289f9a0726fbf6c98f8004caa3365a1bf5d6a1c4fcf399203f405be
   original:
     hackage: statistics-0.16.1.0
+- completed:
+    hackage: text-2.0@sha256:86e64bc76fefb8f0f6529d28ddf24b2a29d43591a8b9b7c7094f481a0db2fb7d,7788
+    pantry-tree:
+      size: 7364
+      sha256: 894b84358fbad3cb8c16f224d3d8b7a1d7b6bcae68cda5a9998dd964904a6560
+  original:
+    hackage: text-2.0
 snapshots:
 - completed:
     size: 616897

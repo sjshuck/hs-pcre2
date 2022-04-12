@@ -91,12 +91,9 @@ main = hspec $ do
             matchOpt BadEscapeIsLiteral "\\j" "\\j" `shouldBe` Just "j"
 
         it "includes compile context options" $ do
-            let otherBsr
-                    | defaultBsr == BsrUnicode = BsrAnyCrlf
-                    | otherwise                = BsrUnicode
-                lineSep = "\x2028"
-            matches "\\R" lineSep
-                `shouldNotBe` matchesOpt (Bsr otherBsr) "\\R" lineSep
+            let bsrMatchesFF bsr = matchesOpt (Bsr bsr) "\\R" "\f"
+            bsrMatchesFF BsrUnicode `shouldBe` True
+            bsrMatchesFF BsrAnyCrlf `shouldBe` False
 
         -- We already know it includes compile recursion guards
 
@@ -223,7 +220,7 @@ main = hspec $ do
 
     describe "PCRE2 build configuration" $ do
         it ("includes Unicode support" `issue` 21) $ do
-            matchesOpt Ucp "\\w" "aleph: \x2135" `shouldBe` True
+            matchesOpt Ucp "\\w$" "aleph: \x2135" `shouldBe` True
 
 -- | Modify label of `describe`, `it`, etc. to include a link to a Github issue.
 issue :: String -> Int -> String
