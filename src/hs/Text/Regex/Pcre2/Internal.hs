@@ -762,11 +762,8 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
     withForeignPtr matchEnvCode $ \codePtr ->
     Text.useAsPtr subject $ \subjPtr subjCUs ->
     Text.useAsPtr replacement $ \replPtr replCUs ->
-    alloca $ \outLenPtr -> do
-        let -- Guess the size of the output to be <= 2x that of the subject.
-            initOutLen = Text.length subject * 2
-
-            run :: CUInt -> Ptr Pcre2_match_context -> PCRE2_SPTR -> IO CInt
+    with (fromIntegral initOutLen) $ \outLenPtr -> do
+        let run :: CUInt -> Ptr Pcre2_match_context -> PCRE2_SPTR -> IO CInt
             run curOpts ctxPtr outBufPtr = pcre2_substitute
                 codePtr
                 (toCUs subjPtr)
@@ -788,7 +785,6 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
                 out <- Text.fromPtr (fromCUs outBufPtr) (fromIntegral outLen)
                 return (result, out)
 
-        poke outLenPtr $ fromIntegral initOutLen
         MatchTempEnv{..} <- mkMatchTempEnv firstMatchEnv subject
         firstAttempt <- withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
             allocaArray initOutLen $ \outBufPtr -> do
@@ -820,6 +816,10 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
                         result <- run 0 ctxPtr outBufPtr
                         maybeRethrow matchTempEnvRef
                         checkAndGetOutput result outBufPtr
+
+    where
+    -- Guess the size of the output to be <= 2x that of the subject.
+    initOutLen = Text.length subject * 2
 
 -- | Helper to generate substitution function.  For consistency with
 -- `pureUserMatcher`.
