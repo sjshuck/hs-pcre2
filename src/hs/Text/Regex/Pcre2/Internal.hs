@@ -946,10 +946,9 @@ getCalloutInfo calloutSubject blockPtr = do
         ovecPtr <- pcre2_callout_block_offset_vector blockPtr
         top <- pcre2_callout_block_capture_top blockPtr
         forM (0 :| [1 .. fromIntegral top - 1]) $ \n -> do
-            [start, end] <- forM [0, 1] $ \i -> peekElemOff ovecPtr $ n * 2 + i
-            evaluate $ maybeSmartSlice calloutSubject $ Slice
-                (fromIntegral start)
-                (fromIntegral end)
+            [start, end] <- forM [0, 1] $ \i ->
+                fromIntegral <$> peekElemOff ovecPtr (n * 2 + i)
+            evaluate $ maybeSmartSlice calloutSubject $ Slice start end
 
     calloutMark <- do
         ptr <- pcre2_callout_block_mark blockPtr
@@ -978,10 +977,9 @@ getSubCalloutInfo subCalloutSubject blockPtr = do
         ovecPtr <- pcre2_substitute_callout_block_ovector blockPtr
         ovecCount <- pcre2_substitute_callout_block_oveccount blockPtr
         forM (0 :| [1 .. fromIntegral ovecCount - 1]) $ \n -> do
-            [start, end] <- forM [0, 1] $ \i -> peekElemOff ovecPtr $ n * 2 + i
-            evaluate $ maybeSmartSlice subCalloutSubject $ Slice
-                (fromIntegral start)
-                (fromIntegral end)
+            [start, end] <- forM [0, 1] $ \i ->
+                fromIntegral <$> peekElemOff ovecPtr (n * 2 + i)
+            evaluate $ maybeSmartSlice subCalloutSubject $ Slice start end
 
     subCalloutReplacement <- do
         outPtr <- pcre2_substitute_callout_block_output blockPtr
