@@ -63,7 +63,7 @@ forMOf kv'd file $ execStateT $ do
   speedup over `pcre-light`, and 20&times; over `regex-pcre`, for longer
   captures.
 * Few dependencies.
-* Bundled, statically-linked UTF-16 build of up-to-date PCRE2 (version 10.39),
+* Bundled, statically-linked UTF-16 build of up-to-date PCRE2 (version 10.40),
   with a complete, exposed Haskell binding.
 
 ## Wishlist

@@ -1,5 +1,8 @@
 # Changelog and Acknowledgements
 
+## 2.1.1
+* Updated PCRE2 to 10.40 (no API changes).
+
 ## 2.1.0.1
 * Explicitly required `text` < 2.
 * Minor docs adjustments.
