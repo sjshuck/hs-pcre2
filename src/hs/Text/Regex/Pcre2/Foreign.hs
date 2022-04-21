@@ -630,3 +630,32 @@ foreign import capi unsafe "pcre2.h" pcre2_get_error_message
     -> Ptr PCRE2_UCHAR
     -> PCRE2_SIZE
     -> IO CInt
+
+-- * Pattern serialization
+
+foreign import capi safe "pcre2.h" pcre2_serialize_decode
+    :: Ptr (Ptr Pcre2_code)      -- ^ codes
+    -> CInt                      -- ^ number of codes
+    -> Ptr CUInt                 -- ^ bytes
+    -> Ptr Pcre2_general_context
+    -> IO CInt
+
+foreign import capi safe "pcre2.h" pcre2_serialize_encode
+    :: Ptr (Ptr Pcre2_code)      -- ^ codes
+    -> CInt                      -- ^ number of codes
+    -> Ptr (Ptr CUInt)           -- ^ serialized bytes
+    -> Ptr PCRE2_SIZE            -- ^ serialized size
+    -> Ptr Pcre2_general_context
+    -> IO CInt
+
+foreign import capi safe "pcre2.h" pcre2_serialize_free
+    :: Ptr CUChar
+    -> IO ()
+
+foreign import capi unsafe "pcre2.h" pcre2_serialize_get_number_of_codes
+    :: Ptr CUChar
+    -> IO CInt
+
+constant ''CInt "ERROR_BADSERIALIZEDDATA"
+constant ''CInt "ERROR_MEMORY"
+constant ''CInt "ERROR_MIXEDTABLES"
