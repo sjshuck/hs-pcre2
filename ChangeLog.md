@@ -1,6 +1,8 @@
 # Changelog and Acknowledgements
 
 ## 2.1.1
+* Added pattern serialization API, which fixes
+  [#23](https://github.com/sjshuck/hs-pcre2/issues/23).
 * Updated PCRE2 to 10.40 (no API changes).
 
 ## 2.1.0.1
