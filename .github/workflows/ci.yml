@@ -60,7 +60,5 @@ jobs:
           enable-stack: true
           stack-no-global: true
 
-      - name: Build library
-        run: stack build
-      - name: Run tests
+      - name: Build library and run tests
         run: stack test
