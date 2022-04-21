@@ -657,5 +657,4 @@ foreign import capi unsafe "pcre2.h" pcre2_serialize_get_number_of_codes
     -> IO CInt
 
 constant ''CInt "ERROR_BADSERIALIZEDDATA"
-constant ''CInt "ERROR_MEMORY"
 constant ''CInt "ERROR_MIXEDTABLES"
