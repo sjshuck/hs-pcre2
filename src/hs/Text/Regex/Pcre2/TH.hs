@@ -12,8 +12,8 @@
 
 module Text.Regex.Pcre2.TH where
 
-import           Control.Monad.State.Strict (evalStateT, forM)
 import           Control.Applicative        (Alternative(..))
+import           Control.Monad.State.Strict (evalStateT, forM)
 import           Data.IORef
 import qualified Data.IntMap.Strict         as IM
 import           Data.List.NonEmpty         (NonEmpty(..))
