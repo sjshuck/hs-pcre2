@@ -1,5 +1,10 @@
 # Changelog and Acknowledgements
 
+## 2.1.1.1
+* Updated library, tests, and docs for `mtl` 2.3 and `microlens-platform`
+  0.4.3.0.  The `mtl` part of this is pursuant to
+  [#30](https://github.com/sjshuck/hs-pcre2/issues/30).
+
 ## 2.1.1
 * Added pattern serialization API, which fixes
   [#23](https://github.com/sjshuck/hs-pcre2/issues/23).
