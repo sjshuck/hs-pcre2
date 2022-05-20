@@ -255,9 +255,3 @@ submitted = "submitted 2020-10-20"
 
 broken :: (Alternative f) => Text -> f Text
 broken = match "*"
-
--- | @microlens@ doesn't have this yet as of 03/09/2022
-_Show :: (Read a, Show a) => Traversal' String a
-_Show f s = case reads s of
-    [(x, "")] -> show <$> f x
-    _         -> pure s
