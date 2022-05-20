@@ -180,7 +180,7 @@ module Text.Regex.Pcre2 (
     --
     -- 2.  A library providing combinators.  For lens newcomers, it is
     -- recommended to grab
-    -- [microlens-platform](https://hackage.haskell.org/package/microlens-platform)&#x2014;most
+    -- [microlens-platform](https://hackage.haskell.org/package/microlens-platform)&#x2014;all
     -- of the examples in this library work with it,
     -- @[packed](https://hackage.haskell.org/package/microlens-platform/docs/Lens-Micro-Platform.html#v:packed)@
     -- and

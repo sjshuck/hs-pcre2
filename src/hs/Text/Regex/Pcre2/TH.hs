@@ -288,9 +288,6 @@ regex = QuasiQuoter{
 -- _regex :: String -> Traversal' Text Text
 -- @
 --
--- > import Control.Lens
--- > import Data.Text.Lens
--- >
 -- > embeddedNumbers :: Traversal' String Int
 -- > embeddedNumbers = packed . [_regex|\d+|] . unpacked . _Show
 -- >
