@@ -8,7 +8,8 @@ module Main where
 
 import           Control.Applicative     (Alternative)
 import           Control.Exception       (catch, evaluate, handle)
-import           Control.Monad.RWS.Lazy  (ask, evalRWS, forM_, tell, void)
+import           Control.Monad           (forM_, void)
+import           Control.Monad.RWS.Lazy  (ask, evalRWS, tell)
 import           Data.IORef              (modifyIORef', newIORef, readIORef)
 import           Data.List.NonEmpty      (NonEmpty(..))
 import           Data.Text               (Text)

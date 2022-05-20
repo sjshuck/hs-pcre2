@@ -9,9 +9,11 @@ module Text.Regex.Pcre2.Internal where
 
 import           Control.Applicative        (Alternative(..))
 import           Control.Exception
+import           Control.Monad
 import           Control.Monad.State.Strict
 import           Data.Either                (partitionEithers)
 import           Data.Foldable              (foldl', toList)
+import           Data.Function              (fix)
 import           Data.Functor.Identity      (Identity(..))
 import           Data.IORef
 import           Data.IntMap.Strict         (IntMap)
