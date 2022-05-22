@@ -5,6 +5,13 @@
 
 packages:
 - completed:
+    hackage: exceptions-0.10.5@sha256:b2c634a95ba2a68e0df3ae67d006f0dabb02edbe4dc77b321133551e308ca047,2832
+    pantry-tree:
+      size: 738
+      sha256: 55b1a4123104e57b5e72b1c5354408807beded8a52ff1900521fed7007812715
+  original:
+    hackage: exceptions-0.10.5
+- completed:
     hackage: microlens-0.4.13.0@sha256:40794f266977558e1138ac034701fa3ff66518bc4ca6a1fba5c575d4157cf0ba,4573
     pantry-tree:
       size: 461
@@ -32,6 +39,34 @@ packages:
       sha256: 7176adca96c038dfb45246785cb60f160724e81746f7830cb19eb31f09873466
   original:
     hackage: microlens-platform-0.4.3.0
+- completed:
+    hackage: mtl-2.3@sha256:9850384335d39f4307bdd8010c61b61cc2adb88adcb6820f8372f4d2f4905a3d,1830
+    pantry-tree:
+      size: 1852
+      sha256: 0f60bd67fb750f8ce7471fbf8b88b62b75079270c3dc56b7ed59920e57fa124a
+  original:
+    hackage: mtl-2.3
+- completed:
+    hackage: parsec-3.1.15.1@sha256:8c7a36aaadff12a38817fc3c4ff6c87e3352cffd1a58df640de7ed7a97ad8fa3,4601
+    pantry-tree:
+      size: 2630
+      sha256: 147ad21b8aa90273721903a6b294cc4ecd660d229d88c4e84c6275bc5d630ae6
+  original:
+    hackage: parsec-3.1.15.1
+- completed:
+    hackage: random-1.2.1.1@sha256:dea1f11e5569332dc6c8efaad1cb301016a5587b6754943a49f9de08ae0e56d9,6541
+    pantry-tree:
+      size: 1528
+      sha256: 646ee77fe01178837ee928b61ae8653dcf190e9b5353ebebd094079c77a18b76
+  original:
+    hackage: random-1.2.1.1
+- completed:
+    hackage: statistics-0.16.1.0@sha256:68c719c034370839f7e8846bf2a79cdd5a205590755e2cd7d2f70cbd7e46b736,5618
+    pantry-tree:
+      size: 5335
+      sha256: 3ddc60975289f9a0726fbf6c98f8004caa3365a1bf5d6a1c4fcf399203f405be
+  original:
+    hackage: statistics-0.16.1.0
 snapshots:
 - completed:
     size: 616897

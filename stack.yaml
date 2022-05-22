@@ -40,10 +40,15 @@ packages:
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
 #
 extra-deps:
+- exceptions-0.10.5
 - microlens-0.4.13.0
 - microlens-ghc-0.4.14.0
 - microlens-mtl-0.2.0.2
 - microlens-platform-0.4.3.0
+- mtl-2.3
+- parsec-3.1.15.1
+- random-1.2.1.1
+- statistics-0.16.1.0
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
