@@ -1,5 +1,16 @@
 # Changelog and Acknowledgements
 
+## 2.2.0
+* Switched to UTF-8 to support `text` 2.0, implementing
+  [#22](https://github.com/sjshuck/hs-pcre2/issues/22).  `text` < 2 is no longer
+  supported.
+  * Changed type synonym `PCRE2_UCHAR` from `CUShort` to `CUChar` in the
+    low-level bindings.
+  * No API changes in the high-level bindings.
+  * There is a minor regression in the ability to match `\R` against line
+    separators (U+2028) and paragraph separators (U+2029).  See
+    [#26](https://github.com/sjshuck/hs-pcre2/issues/26).
+
 ## 2.1.1.1
 * Updated library, tests, and docs for `mtl` 2.3 and `microlens-platform`
   0.4.3.0.  The `mtl` part of this is pursuant to
