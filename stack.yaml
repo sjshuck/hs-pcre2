@@ -45,13 +45,12 @@ extra-deps:
 - microlens-0.4.13.0
 - microlens-ghc-0.4.14.0
 - microlens-mtl-0.2.0.2
-- microlens-platform-0.4.3.0
+- microlens-platform-0.4.3.1
 - mtl-2.3
 - parsec-3.1.15.1
 - random-1.2.1.1
 - statistics-0.16.1.0
 - text-2.0
-allow-newer: true
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
