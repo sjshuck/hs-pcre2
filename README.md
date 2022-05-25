@@ -63,16 +63,13 @@ forMOf kv'd file $ execStateT $ do
   speedup over `pcre-light`, and 20&times; over `regex-pcre`, for longer
   captures.
 * Few dependencies.
-* Bundled, statically-linked UTF-16 build of up-to-date PCRE2 (version 10.40),
+* Bundled, statically-linked UTF-8 build of up-to-date PCRE2 (version 10.40),
   with a complete, exposed Haskell binding.
 
 ## Wishlist
 * Many performance optimizations.  Currently we are as much as 2&ndash;3&times;
   slower than other libraries for some operations, although things are
-  improving.  (We are already faster than
-  [regex-base](https://hackage.haskell.org/package/regex-base)/[regex-pcre](https://hackage.haskell.org/package/regex-pcre)
-  when working with `Text`, even without zero-copying.)  If it's really regex
-  processing that's causing a bottleneck,
+  improving.  If it's really regex processing that's causing a bottleneck,
   [pcre-light](https://hackage.haskell.org/package/pcre-light)/[-heavy](https://hackage.haskell.org/package/pcre-heavy)/[lens-regex-pcre](https://hackage.haskell.org/package/lens-regex-pcre)
   are recommended instead of this library for the very best performance.
 * Make use of DFA matching and JIT compilation.
