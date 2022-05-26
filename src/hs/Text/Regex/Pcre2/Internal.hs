@@ -1286,7 +1286,7 @@ defaultBsr :: Bsr
 defaultBsr = bsrFromC $ getConfigNumeric pcre2_CONFIG_BSR
 
 -- | Which code widths PCRE2 is compiled to operate on.  Can be any combination
--- of 8, 16, and 32.  Should be @[16]@ but provided here for completeness.
+-- of 8, 16, and 32.  Should be @[8]@ but provided here for completeness.
 compiledWidths :: [Int]
 compiledWidths =
     let bitmap = getConfigNumeric pcre2_CONFIG_COMPILED_WIDTHS

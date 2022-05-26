@@ -475,6 +475,10 @@ constant ''CInt "ERROR_NOMEMORY"
 constant ''CInt "ERROR_NULL"
 -- *** UTF-16-specific errors
 --
+-- /Note: These were accidentally left in for version 2.2.0 which otherwise/
+-- /changed `pcre2` from UTF-16 to UTF-8.  They are irrelevant and will be/
+-- /removed in the next minor version./
+--
 -- | "Missing low surrogate at end of string"
 constant ''CInt "ERROR_UTF16_ERR1"
 -- | "Invalid low surrogate follows high surrogate"

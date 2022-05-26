@@ -7,7 +7,7 @@ module Text.Regex.Pcre2 (
     to add regular expressions to Haskell programs.
 
     All input and output strings are strict `Data.Text.Text`, which maps
-    directly to how PCRE2 operates on strings of 16-bit-wide code units.
+    directly to how PCRE2 operates on strings of 8-bit-wide code units.
 
     The C API requires pattern strings to be compiled and the compiled patterns
     to be executed on subject strings in discrete steps.  We hide this
