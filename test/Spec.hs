@@ -59,6 +59,10 @@ main = hspec $ do
             result `shouldBe` Just "123"
             result `shouldBe` ["123", "456"]
 
+        it ("is in UTF mode" `issue` 26) $ do
+            matchesOpt (Bsr BsrUnicode) "\\R$" "line separator: \x2028"
+                `shouldBe` True
+
     describe "lens-powered matching" $ do
         let _nee :: Traversal' Text Text
             _nee = _matchOpt (Caseless <> MatchWord) "nee"

@@ -641,7 +641,7 @@ extractCode patt CompileEnv{..} = do
             codePtr <- pcre2_compile
                 (toCUs pattPtr)
                 (fromIntegral pattCUs)
-                opts
+                (opts .|. pcre2_UTF)
                 errorCodePtr
                 errorOffPtr
                 ctxPtr
