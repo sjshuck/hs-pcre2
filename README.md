@@ -48,7 +48,7 @@ forMOf kv'd file $ execStateT $ do
   compile-once-match-many code.
 * No [custom typeclasses](https://hackage.haskell.org/package/regex-base/docs/Text-Regex-Base-RegexLike.html#t:RegexContext).
 * A single datatype for both compile and match options, the `Option` monoid.
-* `Text` everywhere.
+* `Text` everywhere.  See [below](#unicode) for a version guide.
 * Match success expressed via `Alternative`.
 * Opt-in Template Haskell facilities for compile-time verification of patterns,
   indexing captures, and memoizing inline regexes.
@@ -61,20 +61,29 @@ forMOf kv'd file $ execStateT $ do
   callbacks to run during matching!
 * Zero-copying of substrings where beneficial.
 * Few dependencies.
-* Bundled, statically-linked UTF-8 build of up-to-date PCRE2 (version 10.40),
-  with a complete, exposed Haskell binding.
+* Bundled, statically-linked UTF-8 (formerly UTF-16) build of up-to-date PCRE2
+  (version 10.40), with a complete, exposed Haskell binding.
+
+## Performance
+Currently we are slower than other libraries.  For example:
+
+| Operation                 | `pcre2`   | `pcre-light` | `regex-pcre-builtin` |
+| :--                       |       --: |          --: |                  --: |
+| Compile and match a regex | 3.9 &mu;s |    1.2 &mu;s |            2.9 &mu;s |
+
+If it's really regex processing that's causing a bottleneck,
+[pcre-light](https://hackage.haskell.org/package/pcre-light)/[-heavy](https://hackage.haskell.org/package/pcre-heavy)/[lens-regex-pcre](https://hackage.haskell.org/package/lens-regex-pcre)
+are recommended instead of this library for the very best performance.
+
+## Unicode
+| Encoding | `text` version | `pcre2` version | Code unit representation  |
+| :--      | :--            | :--             | :--                       |
+| UTF-8    | &ge; 2         | &ge; 2.2        | `Foreign.C.Types.CUChar`  |
+| UTF-16   | &lt; 2         | &lt; 2.2        | `Foreign.C.Types.CUShort` |
 
 ## Wishlist
 * Many performance optimizations.  Currently we are slower than other libraries.
   For example:
-
-  | Operation                 | `pcre2`  | `pcre-light` | `regex-pcre-builtin` |
-  | :--                       |      --: |          --: |                  --: |
-  | Compile and match a regex | 3.9&mu;s |     1.2&mu;s |             2.9&mu;s |
-
-  If it's really regex processing that's causing a bottleneck,
-  [pcre-light](https://hackage.haskell.org/package/pcre-light)/[-heavy](https://hackage.haskell.org/package/pcre-heavy)/[lens-regex-pcre](https://hackage.haskell.org/package/lens-regex-pcre)
-  are recommended instead of this library for the very best performance.
 * Make use of DFA matching and JIT compilation.
 * Improve PCRE2 C compile time.
 * Add splitting support.
