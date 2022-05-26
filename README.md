@@ -82,8 +82,7 @@ are recommended instead of this library for the very best performance.
 | UTF-16   | &lt; 2         | &lt; 2.2        | `Foreign.C.Types.CUShort` |
 
 ## Wishlist
-* Many performance optimizations.  Currently we are slower than other libraries.
-  For example:
+* Many performance optimizations.
 * Make use of DFA matching and JIT compilation.
 * Improve PCRE2 C compile time.
 * Add splitting support.
