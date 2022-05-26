@@ -59,17 +59,20 @@ forMOf kv'd file $ execStateT $ do
   Both are first-class.
 * Vast presentation of PCRE2 functionality.  We can even register Haskell
   callbacks to run during matching!
-* Zero-copying of substrings where beneficial.  Benchmarks show a 10&times;
-  speedup over `pcre-light`, and 20&times; over `regex-pcre`, for longer
-  captures.
+* Zero-copying of substrings where beneficial.
 * Few dependencies.
 * Bundled, statically-linked UTF-8 build of up-to-date PCRE2 (version 10.40),
   with a complete, exposed Haskell binding.
 
 ## Wishlist
-* Many performance optimizations.  Currently we are as much as 2&ndash;3&times;
-  slower than other libraries for some operations, although things are
-  improving.  If it's really regex processing that's causing a bottleneck,
+* Many performance optimizations.  Currently we are slower than other libraries.
+  For example:
+
+  | Operation                 | `pcre2`  | `pcre-light` | `regex-pcre-builtin` |
+  | :--                       |      --: |          --: |                  --: |
+  | Compile and match a regex | 3.9&mu;s |     1.2&mu;s |             2.9&mu;s |
+
+  If it's really regex processing that's causing a bottleneck,
   [pcre-light](https://hackage.haskell.org/package/pcre-light)/[-heavy](https://hackage.haskell.org/package/pcre-heavy)/[lens-regex-pcre](https://hackage.haskell.org/package/lens-regex-pcre)
   are recommended instead of this library for the very best performance.
 * Make use of DFA matching and JIT compilation.
