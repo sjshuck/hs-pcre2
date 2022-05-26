@@ -1,5 +1,11 @@
 # Changelog and Acknowledgements
 
+## 2.2.1
+* Fixed [#26](https://github.com/sjshuck/hs-pcre2/issues/26) where wide UTF-8
+  characters were not handled correctly.
+* Docs fully updated for UTF-8 instead of UTF-16.  (Docs were deleted from
+  the 2.2.0 release.)
+
 ## 2.2.0
 * Switched to UTF-8 to support `text` 2.0, implementing
   [#22](https://github.com/sjshuck/hs-pcre2/issues/22).  `text` < 2 is no longer
