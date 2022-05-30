@@ -15,6 +15,7 @@ module Text.Regex.Pcre2.TH where
 import           Control.Applicative        (Alternative(..))
 import           Control.Monad              (forM)
 import           Control.Monad.State.Strict (evalStateT)
+import           Data.Char                  (toUpper)
 import           Data.IORef
 import qualified Data.IntMap.Strict         as IM
 import           Data.List.NonEmpty         (NonEmpty(..))
@@ -27,12 +28,12 @@ import qualified Data.Text.Foreign          as Text
 import           Data.Type.Bool             (If)
 import           Data.Type.Equality         (type (==))
 import           Foreign
-import           Foreign.C                  (CUInt, CUChar)
+import           Foreign.C                  (CUChar, CUInt)
 import           GHC.TypeLits               hiding (Text)
 import qualified GHC.TypeLits               as TypeLits
-import           Language.Haskell.TH
+import           Language.Haskell.TH        hiding (match)
 import           Language.Haskell.TH.Quote
-import           Language.Haskell.TH.Syntax (liftData)
+import           Language.Haskell.TH.Syntax (liftData, sequenceQ)
 import           Lens.Micro
 import           Lens.Micro.Extras          (view)
 import           System.IO.Unsafe           (unsafePerformIO)
@@ -51,6 +52,9 @@ import           Text.Regex.Pcre2.Internal
 -- transform them into application-level data, to avoid leaking the types.
 newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
     deriving (Show {- ^ @since 2.0.4 -})
+
+captured :: Lens' (NonEmpty Text) (Captures info)
+captured f cs = f (Captures cs) <&> \(Captures cs') -> cs'
 
 -- | The kind of `Captures`'s @info@.  The first number is the total number of
 -- parenthesized captures, and the list is a lookup table from capture names to
@@ -157,8 +161,8 @@ getCodeInfo codePtr what = alloca $ \wherePtr -> do
     peek wherePtr
 
 -- | Predict parenthesized captures (maybe named) of a pattern at splice time.
-predictCaptureNamesQ :: String -> Q [Maybe Text]
-predictCaptureNamesQ = runIO . predictCaptureNames mempty . Text.pack
+predictCaptureNamesQ :: Text -> Q [Maybe Text]
+predictCaptureNamesQ = runIO . predictCaptureNames mempty
 
 -- | Get the indexes of `Just` the named captures.
 toKVs :: [Maybe Text] -> [(Int, Text)]
@@ -166,8 +170,8 @@ toKVs names = [(number, name) | (number, Just name) <- zip [1 ..] names]
 
 -- | Generate the data-kinded phantom type parameter of `Captures` of a pattern,
 -- if needed.
-capturesInfoQ :: String -> Q (Maybe Type)
-capturesInfoQ s = predictCaptureNamesQ s >>= \case
+capturesInfoQ :: Text -> Q (Maybe Type)
+capturesInfoQ patt = predictCaptureNamesQ patt >>= \case
     -- No parenthesized captures, so need for Captures, so no info.
     [] -> return Nothing
 
@@ -210,8 +214,46 @@ _matchTH patt = _gcaptures (memoMatcher patt) get0thSlice . _Identity
 
 -- | Helper for `_regex` with parenthesized captures.
 _capturesTH :: Text -> Traversal' Text (Captures info)
-_capturesTH patt = _gcaptures (memoMatcher patt) getAllSlices . captured where
-    captured f cs = f (Captures cs) <&> \(Captures cs') -> cs'
+_capturesTH patt = _gcaptures (memoMatcher patt) getAllSlices . captured
+
+quoteDecParsePatt = "^\\s*(_*[^\\s=_][^\\s=]+)\\s*=\\s*(.*)"
+
+quoteDecParse :: Text -> Maybe (NonEmpty Text)
+quoteDecParse = capturesOpt DotAll $ Text.pack quoteDecParsePatt
+
+mkRegexQuoteDec :: String -> ExpQ -> ExpQ -> (TypeQ -> TypeQ) -> String -> DecsQ
+mkRegexQuoteDec qqName capturesE matchE mkT s = do
+    (funName, funPatt) <- case quoteDecParse $ Text.pack s of
+        Just (_ :| [funName, funPatt]) -> return (Text.unpack funName, funPatt)
+        _                              -> fail $
+            qqName ++ ": quasi-quoted string does not conform to\n" ++
+                replicate 20 ' ' ++ quoteDecParsePatt
+
+    (tySynDecs, resultT, matchFun) <- capturesInfoQ funPatt <&> \case
+        -- Parenthesized captures.
+        --
+        -- type MyRegexCaptures = Captures ...
+        -- myRegex :: Traversal' Text MyRegexCaptures
+        -- myRegex = _captures patt . captured
+        Just info ->
+            let tySynName = mkName $ mangledFunName ++ "Captures"
+                mangledFunName = dropWhile (== '_') funName & _head %~ toUpper
+                tySynRhs = [t| Captures $(return info) |]
+            in ([tySynD tySynName [] tySynRhs], conT tySynName, capturesE)
+
+        -- No parenthesized captures.
+        --
+        -- myRegex :: Traversal' Text Text
+        -- myRegex = match patt
+        Nothing -> ([], [t| Text |], matchE)
+
+    let -- myRegex :: ...
+        sigDec = sigD (mkName funName) (mkT resultT)
+        -- myRegex = ...
+        funDec = valD (varP $ mkName funName) (normalB body) []
+        body = [e| $(matchFun) $ Text.pack $(stringE $ Text.unpack funPatt) |]
+
+    sequenceQ $ tySynDecs ++ [sigDec, funDec]
 
 -- | === As an expression
 --
@@ -255,13 +297,13 @@ _capturesTH patt = _gcaptures (memoMatcher patt) getAllSlices . captured where
 regex :: QuasiQuoter
 regex = QuasiQuoter{
     quoteExp = \s -> do
-        let regexQ = capturesInfoQ s >>= \case
+        let regexQ = capturesInfoQ (Text.pack s) >>= \case
                 Nothing   -> [e| matchTH |]
                 Just info -> [e| capturesTH |] `appTypeE` return info
         regexQ `appE` [e| Text.pack $(stringE s) |],
 
     quotePat = \s -> do
-        captureNames <- predictCaptureNamesQ s
+        captureNames <- predictCaptureNamesQ $ Text.pack s
 
         case toKVs captureNames of
             -- No named captures.  Test whether the string matches without
@@ -282,7 +324,11 @@ regex = QuasiQuoter{
 
     quoteType = const $ fail "regex: cannot produce a type",
 
-    quoteDec = const $ fail "regex: cannot produce declarations"}
+    quoteDec = mkRegexQuoteDec
+        "regex"
+        [e| \patt -> fmap Captures . captures patt |]
+        [e| match |]
+        (\resultT -> [t| forall f. (Alternative f) => Text -> f $(resultT) |])}
 
 -- | An optical variant of `regex`\/a type-annotated variant of `_captures`. Can
 -- only be used as an expression.
@@ -302,7 +348,7 @@ regex = QuasiQuoter{
 _regex :: QuasiQuoter
 _regex = QuasiQuoter{
     quoteExp = \s -> do
-        let _regexQ = capturesInfoQ s >>= \case
+        let _regexQ = capturesInfoQ (Text.pack s) >>= \case
                 Nothing   -> [e| _matchTH |]
                 Just info -> [e| _capturesTH |] `appTypeE` return info
         _regexQ `appE` [e| Text.pack $(stringE s) |],
@@ -311,4 +357,8 @@ _regex = QuasiQuoter{
 
     quoteType = const $ fail "_regex: cannot produce a type",
 
-    quoteDec = const $ fail "_regex: cannot produce declarations"}
+    quoteDec = mkRegexQuoteDec
+        "_regex"
+        [e| \patt -> _captures patt . captured |]
+        [e| _match |]
+        (\resultT -> [t| Traversal' Text $(resultT) |])}

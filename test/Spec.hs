@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -256,3 +257,8 @@ submitted = "submitted 2020-10-20"
 
 broken :: (Alternative f) => Text -> f Text
 broken = match "*"
+
+[regex|foo = (?i)foo (\w+)|]
+[regex|bar = (?i)bar \w+|]
+[_regex|_baz = (?i)baz (\w+)|]
+[_regex|_quux = (?i)quux \w+|]
