@@ -60,16 +60,16 @@ type CapturesInfo = (Nat, [(Symbol, Nat)])
 -- | Look up the number of a capture at compile time, either by number or by
 -- name.  Throw a helpful 'TypeError' if the index doesn't exist.
 type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
-    CaptNum (num :: Nat) '(hi, _) = If (num `CmpNat` hi == 'GT)
+    CaptNum (i :: Nat) '(hi, _) = If (i `CmpNat` hi == 'GT)
         -- then
-        (TypeError (TypeLits.Text "No capture numbered " :<>: ShowType num))
+        (TypeError (TypeLits.Text "No capture numbered " :<>: ShowType i))
         -- else
-        num
+        i
 
-    CaptNum (name :: Symbol) '(_, '(name, num) ': _) = num
-    CaptNum (name :: Symbol) '(hi, _ ': kvs) = CaptNum name '(hi, kvs)
-    CaptNum (name :: Symbol) _ = TypeError
-        (TypeLits.Text "No capture named " :<>: ShowType name)
+    CaptNum (i :: Symbol) '(_,  '(i, num) ': _)   = num
+    CaptNum (i :: Symbol) '(hi, _         ': kvs) = CaptNum i '(hi, kvs)
+    CaptNum (i :: Symbol) _                       = TypeError
+        (TypeLits.Text "No capture named " :<>: ShowType i)
 
     CaptNum _ _ = TypeError
         (TypeLits.Text "Capture index must be a number (Nat) or name (Symbol)")
