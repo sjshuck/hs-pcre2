@@ -28,7 +28,7 @@ import qualified Data.Text.Foreign          as Text
 import           Data.Typeable              (cast)
 import           Data.Void                  (Void, absurd)
 import           Foreign
-import           Foreign.C.Types            (CInt(..), CUInt(..), CUChar)
+import           Foreign.C.Types            (CInt(..), CUChar, CUInt(..))
 import qualified Foreign.Concurrent         as Conc
 import           Lens.Micro
 import           Lens.Micro.Extras          (preview, view)
