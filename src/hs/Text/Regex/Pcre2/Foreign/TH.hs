@@ -1,5 +1,8 @@
+{-# LANGUAGE TemplateHaskellQuotes #-}
+
 module Text.Regex.Pcre2.Foreign.TH where
 
+import Foreign             (Ptr)
 import Language.Haskell.TH
 
 {-
@@ -26,14 +29,8 @@ foreign import capi unsafe "getters.h" pcre2_callout_block_version
 -}
 getter :: String -> TypeQ -> String -> DecsQ
 getter blockSuffix fieldTypeQ field = do
-    fieldType <- fieldTypeQ
+    let blockName = mkName $ "Pcre2_" ++ blockSuffix
+    ty <- [t| Ptr $(conT blockName) -> IO $(fieldTypeQ) |]
     let dec = ForeignD $ ImportF CApi Unsafe "getters.h" name ty
         name = mkName $ "pcre2_" ++ blockSuffix ++ "_" ++ field
-        ty = AppT
-            (AppT ArrowT $ AppT
-                (ConT $ mkName "Ptr")
-                (ConT $ mkName $ "Pcre2_" ++ blockSuffix))
-            (AppT
-                (ConT $ mkName "IO")
-                fieldType)
     return [dec]
