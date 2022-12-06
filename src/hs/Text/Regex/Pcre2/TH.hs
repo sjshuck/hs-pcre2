@@ -16,10 +16,11 @@ import           Control.Applicative        (Alternative(..))
 import           Control.Monad              (forM)
 import           Control.Monad.State.Strict (evalStateT)
 import           Data.IORef
-import qualified Data.IntMap.Strict         as IM
-import           Data.List.NonEmpty         (NonEmpty(..))
+import           Data.List                  (sortBy)
+import           Data.List.NonEmpty         (NonEmpty)
 import           Data.Map.Lazy              (Map)
 import qualified Data.Map.Lazy              as Map
+import           Data.Ord                   (comparing)
 import           Data.Proxy                 (Proxy(..))
 import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
@@ -27,7 +28,7 @@ import qualified Data.Text.Foreign          as Text
 import           Data.Type.Bool             (If)
 import           Data.Type.Equality         (type (==))
 import           Foreign
-import           Foreign.C                  (CUInt, CUChar)
+import           Foreign.C                  (CUChar, CUInt)
 import           GHC.TypeLits               hiding (Text)
 import qualified GHC.TypeLits               as TypeLits
 import           Language.Haskell.TH
@@ -115,40 +116,37 @@ memoMatcher patt = unsafePerformIO $ do
             let matcher = pureUserMatcher mempty patt
             in (Map.insert patt matcher cache, matcher)
 
--- | From options and pattern, determine parenthesized captures' names in order.
-predictCaptureNames :: Option -> Text -> IO [Maybe Text]
-predictCaptureNames option patt = do
+-- | From options and pattern, determine number of parenthesized captures, along
+-- with a list of their names (each indexed and in index order).
+predictCapturesInfo :: Option -> Text -> IO (Int, [(Text, Int)])
+predictCapturesInfo option patt = do
     code <- evalStateT
         (extractCompileEnv >>= extractCode patt)
         (applyOption option)
 
-    withForeignPtr code getCaptureNames
+    withForeignPtr code $ \codePtr -> do
+        count <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMECOUNT
+        entrySize <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMEENTRYSIZE
+        table <- getCodeInfo @PCRE2_SPTR codePtr pcre2_INFO_NAMETABLE
 
--- | Get parenthesized captures' names in order.
-getCaptureNames :: Ptr Pcre2_code -> IO [Maybe Text]
-getCaptureNames codePtr = do
-    nameCount <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMECOUNT
-    nameEntrySize <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMEENTRYSIZE
-    nameTable <- getCodeInfo @PCRE2_SPTR codePtr pcre2_INFO_NAMETABLE
+        -- Can't do [0 .. count - 1] because it underflows when count == 0
+        let indexes = takeWhile (< count) [0 ..]
+        lookupTable <- forM indexes $ \i -> do
+            let entryPtr = table `advancePtr` fromIntegral (i * entrySize)
+                groupNamePtr = entryPtr `advancePtr` 2
+            groupNumber <- do
+                (hi, lo) <- forOf each (0, 1) $ \off ->
+                    fromIntegral @CUChar <$> peekByteOff entryPtr off
+                return $ hi `shiftL` 8 + lo
+            groupNameLen <- lengthArray0 0 groupNamePtr
+            groupName <- Text.fromPtr
+                (fromCUs groupNamePtr)
+                (fromIntegral groupNameLen)
+            return (groupName, groupNumber)
 
-    -- Can't do [0 .. nameCount - 1] because it underflows when nameCount == 0
-    let indexes = takeWhile (< nameCount) [0 ..]
-    names <- fmap IM.fromList $ forM indexes $ \i -> do
-        let entryPtr = nameTable `advancePtr` fromIntegral (i * nameEntrySize)
-            groupNamePtr = entryPtr `advancePtr` 2
-        groupNumber <- do
-            [hi, lo] <- forM [0, 1] $ \off ->
-                fromIntegral @CUChar <$> peekByteOff entryPtr off
-            return $ hi `shiftL` 8 + lo
-        groupNameLen <- lengthArray0 0 groupNamePtr
-        groupName <- Text.fromPtr
-            (fromCUs groupNamePtr)
-            (fromIntegral groupNameLen)
-        return (groupNumber, groupName)
+        hiCaptNum <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
 
-    hiCaptNum <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
-
-    return $ map (names IM.!?) [1 .. fromIntegral hiCaptNum]
+        return (fromIntegral hiCaptNum, sortBy (comparing snd) lookupTable)
 
 -- | Low-level access to compiled pattern info, per the docs.
 getCodeInfo :: (Storable a) => Ptr Pcre2_code -> CUInt -> IO a
@@ -156,32 +154,26 @@ getCodeInfo codePtr what = alloca $ \wherePtr -> do
     pcre2_pattern_info codePtr what wherePtr >>= check (== 0)
     peek wherePtr
 
--- | Predict parenthesized captures (maybe named) of a pattern at splice time.
-predictCaptureNamesQ :: String -> Q [Maybe Text]
-predictCaptureNamesQ = runIO . predictCaptureNames mempty . Text.pack
-
--- | Get the indexes of `Just` the named captures.
-toKVs :: [Maybe Text] -> [(Int, Text)]
-toKVs names = [(number, name) | (number, Just name) <- zip [1 ..] names]
+-- | Predict info about parenthesized captures of a pattern at splice time.
+predictCapturesInfoQ :: String -> Q (Int, [(Text, Int)])
+predictCapturesInfoQ = runIO . predictCapturesInfo mempty . Text.pack
 
 -- | Generate the data-kinded phantom type parameter of `Captures` of a pattern,
 -- if needed.
 capturesInfoQ :: String -> Q (Maybe Type)
-capturesInfoQ s = predictCaptureNamesQ s >>= \case
+capturesInfoQ s = predictCapturesInfoQ s >>= \case
     -- No parenthesized captures, so need for Captures, so no info.
-    [] -> return Nothing
+    (0, _) -> return Nothing
 
-    -- One or more parenthesized captures.  Present
-    --     [Just "foo", Nothing, Nothing, Just "bar", Nothing]
-    -- as
+    -- One or more parenthesized captures.  Produce
     --     '(5, '[ '("foo", 1), '("bar", 4)]).
-    captureNames -> Just <$> promotedTupleT 2 `appT` hiQ `appT` kvsQ where
+    (len, lookupTable) -> Just <$> promotedTupleT 2 `appT` hiQ `appT` kvsQ where
         -- 5
-        hiQ = litT $ numTyLit $ fromIntegral $ length captureNames
+        hiQ = litT $ numTyLit $ fromIntegral len
         -- '[ '("foo", 1), '("bar", 4)]
-        kvsQ = foldr f promotedNilT $ toKVs captureNames
+        kvsQ = foldr f promotedNilT lookupTable
         -- '("foo", 1) ': ...
-        f (number, name) r = promotedConsT `appT` kvQ `appT` r where
+        f (name, number) r = promotedConsT `appT` kvQ `appT` r where
             kvQ = promotedTupleT 2                           -- '(,)
                 `appT` litT (strTyLit $ Text.unpack name)    -- "foo"
                 `appT` litT (numTyLit $ fromIntegral number) -- 1
@@ -212,6 +204,18 @@ _matchTH patt = _gcaptures (memoMatcher patt) get0thSlice . _Identity
 _capturesTH :: Text -> Traversal' Text (Captures info)
 _capturesTH patt = _gcaptures (memoMatcher patt) getAllSlices . captured where
     captured f cs = f (Captures cs) <&> \(Captures cs') -> cs'
+
+-- | Helper to generate a `Text` in code.
+textQ :: String -> ExpQ
+textQ s = [e| Text.pack $(stringE s) |]
+
+-- | Helper to generate a `quoteExp` function, which either simply matches the
+-- subject or produces captures depending on the pattern.
+mkQuoteExp :: ExpQ -> ExpQ -> String -> ExpQ
+mkQuoteExp matchE capturesE s = regexQ `appE` textQ s where
+    regexQ = capturesInfoQ s >>= \case
+        Nothing   -> matchE
+        Just info -> capturesE `appTypeE` return info
 
 -- | === As an expression
 --
@@ -254,35 +258,18 @@ _capturesTH patt = _gcaptures (memoMatcher patt) getAllSlices . captured where
 -- If there are no named captures, this simply acts as a guard.
 regex :: QuasiQuoter
 regex = QuasiQuoter{
-    quoteExp = \s -> do
-        let regexQ = capturesInfoQ s >>= \case
-                Nothing   -> [e| matchTH |]
-                Just info -> [e| capturesTH |] `appTypeE` return info
-        regexQ `appE` [e| Text.pack $(stringE s) |],
+    quoteExp = mkQuoteExp [e| matchTH |] [e| capturesTH |],
 
-    quotePat = \s -> do
-        captureNames <- predictCaptureNamesQ s
+    quotePat = \s -> predictCapturesInfoQ s >>= \info -> case snd info of
+        []          -> viewP [e| matchesTH $(textQ s) |] [p| True |]
+        lookupTable -> viewP e p where
+            (names, numbers) = unzip lookupTable
+            e = [e| capturesNumberedTH $(textQ s) $(liftData numbers) |]
+            p = foldr f wildP names
+            f name r = conP '(:) [varP $ mkName $ Text.unpack name, r],
 
-        case toKVs captureNames of
-            -- No named captures.  Test whether the string matches without
-            -- creating any new Text values.
-            [] -> viewP
-                [e| matchesTH (Text.pack $(stringE s)) |]
-                [p| True |]
-
-            -- One or more named captures.  Attempt to bind only those to local
-            -- variables of the same names.
-            numberedNames -> viewP e p where
-                (numbers, names) = unzip numberedNames
-                e = [e| capturesNumberedTH
-                    (Text.pack $(stringE s))
-                    $(liftData numbers) |]
-                p = foldr f wildP names
-                f name r = conP '(:) [varP $ mkName $ Text.unpack name, r],
-
-    quoteType = const $ fail "regex: cannot produce a type",
-
-    quoteDec = const $ fail "regex: cannot produce declarations"}
+    quoteType = \_ -> fail "regex: cannot produce a type",
+    quoteDec  = \_ -> fail "regex: cannot produce declarations"}
 
 -- | An optical variant of `regex`\/a type-annotated variant of `_captures`. Can
 -- only be used as an expression.
@@ -301,14 +288,8 @@ regex = QuasiQuoter{
 -- > -- There are 15 competing standards
 _regex :: QuasiQuoter
 _regex = QuasiQuoter{
-    quoteExp = \s -> do
-        let _regexQ = capturesInfoQ s >>= \case
-                Nothing   -> [e| _matchTH |]
-                Just info -> [e| _capturesTH |] `appTypeE` return info
-        _regexQ `appE` [e| Text.pack $(stringE s) |],
+    quoteExp = mkQuoteExp [e| _matchTH |] [e| _capturesTH |],
 
-    quotePat = const $ fail "_regex: cannot produce a pattern",
-
-    quoteType = const $ fail "_regex: cannot produce a type",
-
-    quoteDec = const $ fail "_regex: cannot produce declarations"}
+    quotePat  = \_ -> fail "_regex: cannot produce a pattern",
+    quoteType = \_ -> fail "_regex: cannot produce a type",
+    quoteDec  = \_ -> fail "_regex: cannot produce declarations"}
