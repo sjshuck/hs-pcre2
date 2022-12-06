@@ -41,7 +41,8 @@ jobs:
       - name: Build benchmarks
         run: cabal build --enable-benchmarks
         # pcre (via pcre-light) not available on windows (without further setup)
-        if: runner.os != 'Windows'
+        # Also not building on macOS
+        if: runner.os == 'Linux'
       - name: Build documentation
         run: cabal haddock
   stack:
