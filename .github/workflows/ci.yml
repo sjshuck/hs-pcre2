@@ -14,8 +14,8 @@ jobs:
         os: [ubuntu-latest, macOS-latest, windows-latest]
         ghc:
           - 9.0.2
-          - 9.2.4
-          - 9.4.2
+          - 9.2.5
+          - 9.4.4
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3

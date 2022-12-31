@@ -62,7 +62,7 @@ forMOf kv'd file $ execStateT $ do
 * Zero-copying of substrings where beneficial.
 * Few dependencies.
 * Bundled, statically-linked UTF-8 (formerly UTF-16) build of up-to-date PCRE2
-  (version 10.40), with a complete, exposed Haskell binding.
+  (version 10.42), with a complete, exposed Haskell binding.
 
 ## Performance
 Currently we are slower than other libraries.  For example:

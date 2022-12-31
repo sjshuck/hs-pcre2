@@ -17,7 +17,7 @@
 #
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
-resolver: lts-19.25
+resolver: lts-20.5
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -40,17 +40,17 @@ packages:
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
 #
 extra-deps:
-- exceptions-0.10.5
-- hashable-1.4.0.2
-- microlens-0.4.13.0
-- microlens-ghc-0.4.14.0
-- microlens-mtl-0.2.0.2
-- microlens-platform-0.4.3.1
-- mtl-2.3
+- exceptions-0.10.7
+- hashable-1.4.1.0
+- microlens-0.4.13.1
+- microlens-ghc-0.4.14.1
+- microlens-mtl-0.2.0.3
+- microlens-platform-0.4.3.3
+- mtl-2.3.1
 - parsec-3.1.15.1
 - random-1.2.1.1
-- statistics-0.16.1.0
-- text-2.0
+- statistics-0.16.1.2
+- text-2.0.1
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

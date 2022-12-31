@@ -5,54 +5,54 @@
 
 packages:
 - completed:
-    hackage: exceptions-0.10.5@sha256:b2c634a95ba2a68e0df3ae67d006f0dabb02edbe4dc77b321133551e308ca047,2832
+    hackage: exceptions-0.10.7@sha256:14e90e14927f55b1c1172ee9fc3d6a481474f3ac4e58e1f53aa3d157b7d8fbf2,2788
     pantry-tree:
-      sha256: 55b1a4123104e57b5e72b1c5354408807beded8a52ff1900521fed7007812715
-      size: 738
+      sha256: bd4c82588200923ff221ffcda4adeaf89848ef436943514e254532897304828b
+      size: 739
   original:
-    hackage: exceptions-0.10.5
+    hackage: exceptions-0.10.7
 - completed:
-    hackage: hashable-1.4.0.2@sha256:0cddd0229d1aac305ea0404409c0bbfab81f075817bd74b8b2929eff58333e55,5005
+    hackage: hashable-1.4.1.0@sha256:50b2f002c68fe67730ee7a3cd8607486197dd99b084255005ad51ecd6970a41b,5019
     pantry-tree:
-      sha256: 51dda0aa70849588d074125f324beba1c8736cfa486e7f4a90a798b1d0e6019d
+      sha256: 9af2f7a42674f7effcabbebc043f97057240783f1709338a77f58216f4a5f18c
       size: 1248
   original:
-    hackage: hashable-1.4.0.2
+    hackage: hashable-1.4.1.0
 - completed:
-    hackage: microlens-0.4.13.0@sha256:40794f266977558e1138ac034701fa3ff66518bc4ca6a1fba5c575d4157cf0ba,4573
+    hackage: microlens-0.4.13.1@sha256:0cd8a0da5fe1b5a5c327bb5296d30940dc9f92c169372939bfcecd3faee953d7,4642
     pantry-tree:
-      sha256: 7e3c2e67a573a4ba4bd8ebff631b7a6e0e2d81fb785b9e9fcd6bd02f18743ac3
+      sha256: 8cf825336264bb5b0434b2b57fc808b84e503c4ec4106d5e05d975f22b9ca5cd
       size: 461
   original:
-    hackage: microlens-0.4.13.0
+    hackage: microlens-0.4.13.1
 - completed:
-    hackage: microlens-ghc-0.4.14.0@sha256:a261773f6ca4cd6a6e5028aa2b6ba1ed311c08656022beed16edd3c21536e8e6,2593
+    hackage: microlens-ghc-0.4.14.1@sha256:d0880578fc41358eaa38e8222ebd578ccf3c079dc6d4e55bae0b105ac89b53d4,2662
     pantry-tree:
-      sha256: b36eef1342161945585df97699f4ab0c841d057e874b00cfa25b6240c4f0c4da
+      sha256: 6a83fdeeaf536b4b005570055496cf88fa652272dbfe39598dad88412685accc
       size: 343
   original:
-    hackage: microlens-ghc-0.4.14.0
+    hackage: microlens-ghc-0.4.14.1
 - completed:
-    hackage: microlens-mtl-0.2.0.2@sha256:ab8f264c6fecd763818c2e73740487ac371a4fd92cc32031c1c9de284a10518e,1875
+    hackage: microlens-mtl-0.2.0.3@sha256:0ace1ba95677117219681fb9a8b08b3bf049ab5973eed14453b260aaf1feb582,1965
     pantry-tree:
-      sha256: 672cebfcd8f371f2841f269c4c0a35a2c1de4c6e24ebb00cdfe5b2651fcc795b
+      sha256: 6a67528c409030bda8dd7b775288fc4c86bbd235bc82b77216c0ff7fb715b58a
       size: 344
   original:
-    hackage: microlens-mtl-0.2.0.2
+    hackage: microlens-mtl-0.2.0.3
 - completed:
-    hackage: microlens-platform-0.4.3.1@sha256:cc532d6189eb049b82d4b6b590906fae6c5ad8621af970e05b6975a06679afdc,2844
+    hackage: microlens-platform-0.4.3.3@sha256:8ef4c8d5b9e0948489aa0b0b6a90c3d0c52e768e4e1f0e3f87697f6abd5d88fd,2930
     pantry-tree:
-      sha256: 4b59b19b8395095716d150b7922a245fafb4630892af9b64985460b7f7752fff
+      sha256: 88798635590d2dc4920d956f3b8c43f942851bd88569f27150a9765b3fc40a58
       size: 358
   original:
-    hackage: microlens-platform-0.4.3.1
+    hackage: microlens-platform-0.4.3.3
 - completed:
-    hackage: mtl-2.3@sha256:9850384335d39f4307bdd8010c61b61cc2adb88adcb6820f8372f4d2f4905a3d,1830
+    hackage: mtl-2.3.1@sha256:5377696d7315e2ef31a8d15d67b22d733c20cac2caf8b26756ff8524c8217e6d,1868
     pantry-tree:
-      sha256: 0f60bd67fb750f8ce7471fbf8b88b62b75079270c3dc56b7ed59920e57fa124a
-      size: 1852
+      sha256: ac3cf1dc9ef397512d4bf8f2c3fbe4d64fb8aabd253288b34bf86c09ae234d4f
+      size: 1853
   original:
-    hackage: mtl-2.3
+    hackage: mtl-2.3.1
 - completed:
     hackage: parsec-3.1.15.1@sha256:8c7a36aaadff12a38817fc3c4ff6c87e3352cffd1a58df640de7ed7a97ad8fa3,4601
     pantry-tree:
@@ -68,22 +68,22 @@ packages:
   original:
     hackage: random-1.2.1.1
 - completed:
-    hackage: statistics-0.16.1.0@sha256:68c719c034370839f7e8846bf2a79cdd5a205590755e2cd7d2f70cbd7e46b736,5618
+    hackage: statistics-0.16.1.2@sha256:b20c8c52eb9f7d4e4a7b15f639f29595c22d72b7265d8ab7f480c43398e59ed0,5618
     pantry-tree:
-      sha256: 3ddc60975289f9a0726fbf6c98f8004caa3365a1bf5d6a1c4fcf399203f405be
+      sha256: a2e090c862b1b0331f1ece66e4cb45419db7f1a87bb13c51ffbb2bb98f19778e
       size: 5335
   original:
-    hackage: statistics-0.16.1.0
+    hackage: statistics-0.16.1.2
 - completed:
-    hackage: text-2.0@sha256:86e64bc76fefb8f0f6529d28ddf24b2a29d43591a8b9b7c7094f481a0db2fb7d,7788
+    hackage: text-2.0.1@sha256:907ecca6d20c42dafceb709ebac546f5d72e8b7dda3c39b286888c2f09e3bad8,9262
     pantry-tree:
-      sha256: 894b84358fbad3cb8c16f224d3d8b7a1d7b6bcae68cda5a9998dd964904a6560
-      size: 7364
+      sha256: 2a661574e5663d733c08f4c34e1bdaaa9fd530be551aef0db99f1689541839c8
+      size: 7359
   original:
-    hackage: text-2.0
+    hackage: text-2.0.1
 snapshots:
 - completed:
-    sha256: 1ecad1f0bd2c27de88dbff6572446cfdf647c615d58a7e2e2085c6b7dfc04176
-    size: 619403
-    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/19/25.yaml
-  original: lts-19.25
+    sha256: a684cdbdf9304b325a503e0fe1d9648e9c18155ce4c7cfebbe8a7f93674e6295
+    size: 649106
+    url: https://raw.githubusercontent.com/commercialhaskell/stackage-snapshots/master/lts/20/5.yaml
+  original: lts-20.5

@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.34.4.
+-- This file has been generated from package.yaml by hpack version 0.35.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -70,6 +70,7 @@ extra-source-files:
     src/c/pcre2/src/pcre2demo.c
     src/c/pcre2/src/pcre2grep.c
     src/c/pcre2/src/pcre2posix.c
+    src/c/pcre2/src/pcre2posix_test.c
     src/c/pcre2/src/pcre2test.c
     src/c/pcre2/src/sljit/sljitExecAllocator.c
     src/c/pcre2/src/sljit/sljitLir.c
@@ -82,9 +83,10 @@ extra-source-files:
     src/c/pcre2/src/sljit/sljitNativePPC_32.c
     src/c/pcre2/src/sljit/sljitNativePPC_64.c
     src/c/pcre2/src/sljit/sljitNativePPC_common.c
+    src/c/pcre2/src/sljit/sljitNativeRISCV_32.c
+    src/c/pcre2/src/sljit/sljitNativeRISCV_64.c
+    src/c/pcre2/src/sljit/sljitNativeRISCV_common.c
     src/c/pcre2/src/sljit/sljitNativeS390X.c
-    src/c/pcre2/src/sljit/sljitNativeSPARC_32.c
-    src/c/pcre2/src/sljit/sljitNativeSPARC_common.c
     src/c/pcre2/src/sljit/sljitNativeX86_32.c
     src/c/pcre2/src/sljit/sljitNativeX86_64.c
     src/c/pcre2/src/sljit/sljitNativeX86_common.c
