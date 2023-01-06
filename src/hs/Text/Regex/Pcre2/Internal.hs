@@ -26,7 +26,6 @@ import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
 import qualified Data.Text.Foreign          as Text
 import           Data.Typeable              (cast)
-import           Data.Void                  (Void, absurd)
 import           Foreign
 import           Foreign.C.Types            (CInt(..), CUChar, CUInt(..))
 import qualified Foreign.Concurrent         as Conc
@@ -76,14 +75,6 @@ unchompedLines s = case break (== '\n') s of
 -- > fix1 x0 $ \go x -> ...
 fix1 :: a -> ((a -> b) -> a -> b) -> b
 fix1 x f = fix f x
-
--- | Like `fix1`, but for a function of two arguments.  Currently unused.
-fix2 :: a -> b -> ((a -> b -> c) -> a -> b -> c) -> c
-fix2 x y f = fix f x y
-
--- | Like `fix1`, but for a function of three arguments.  Currently unused.
-fix3 :: a -> b -> c -> ((a -> b -> c -> d) -> a -> b -> c -> d) -> d
-fix3 x y z f = fix f x y z
 
 -- ** Fast @Text@ slicing
 
@@ -136,12 +127,11 @@ _Identity f (Identity x) = Identity <$> f x
 
 -- ** Streaming support
 
--- | A @FreeT@-style stream that can short-circuit.
+-- | A @FreeT@-style stream.
 data Stream b m a
     = StreamPure a
     | StreamYield b (Stream b m a)    -- ^ Yield a value and keep going.
     | StreamEffect (m (Stream b m a)) -- ^ Have an effect and keep going.
-    | StreamStop                      -- ^ Short-circuit.
     deriving (Functor)
 
 instance (Functor m) => Applicative (Stream b m) where
@@ -149,13 +139,11 @@ instance (Functor m) => Applicative (Stream b m) where
     StreamPure f     <*> sx = f <$> sx
     StreamYield y sf <*> sx = StreamYield y $ sf <*> sx
     StreamEffect msf <*> sx = StreamEffect $ msf <&> (<*> sx)
-    StreamStop       <*> _  = StreamStop
 
 instance (Functor m) => Monad (Stream b m) where
     StreamPure x     >>= f = f x
     StreamYield y sx >>= f = StreamYield y $ sx >>= f
     StreamEffect msx >>= f = StreamEffect $ msx <&> (>>= f)
-    StreamStop       >>= _ = StreamStop
 
 instance MonadTrans (Stream b) where
     lift = StreamEffect . fmap StreamPure
@@ -172,17 +160,13 @@ mapMS f = fix $ \go -> \case
     StreamPure x     -> StreamPure x
     StreamYield y sx -> StreamEffect $ f y <&> \y' -> StreamYield y' $ go sx
     StreamEffect ms  -> StreamEffect $ go <$> ms
-    StreamStop       -> StreamStop
 
 -- | Unsafely, lazily tear down a `Stream` into a pure list of values yielded.
--- The stream must be infinite in the sense of it only terminating due to
--- explicit `StreamStop`.
-unsafeLazyStreamToList :: Stream b IO Void -> [b]
+unsafeLazyStreamToList :: Stream b IO a -> [b]
 unsafeLazyStreamToList = fix $ \continue -> \case
-    StreamPure v    -> absurd v
+    StreamPure _    -> []
     StreamYield y s -> y : continue s
     StreamEffect ms -> continue $ unsafePerformIO ms
-    StreamStop      -> []
 
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
@@ -194,7 +178,7 @@ unsafeLazyStreamToList = fix $ \continue -> \case
 -- global match; they represent the states of the C data at moments in time, and
 -- are intended to be composed with another streaming transformation before
 -- being subjected to teardown and `unsafePerformIO`.
-type Matcher = Text -> Stream (Ptr Pcre2_match_data) IO Void
+type Matcher = Text -> Stream (Ptr Pcre2_match_data) IO ()
 
 -- | A substitution function.  It takes a subject and produces the number of
 -- substitutions performed (0 or 1, or more in the presence of `SubGlobal`)
@@ -456,7 +440,6 @@ data SubCalloutResult
 type CompileContext = ForeignPtr Pcre2_compile_context
 type Code           = ForeignPtr Pcre2_code
 type MatchContext   = ForeignPtr Pcre2_match_context
-type MatchData      = ForeignPtr Pcre2_match_data
 
 -- | An `Option` can result in multiple \"plans\".
 applyOption :: Option -> [AppliedOption]
@@ -713,24 +696,22 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $
                     ctxPtr
 
             -- Handle no match and errors
-            when (result == pcre2_ERROR_NOMATCH) StreamStop
-            when (result == pcre2_ERROR_CALLOUT) $
-                liftIO $ maybeRethrow matchTempEnvRef
-            liftIO $ check (> 0) result
+            unless (result == pcre2_ERROR_NOMATCH) $ do
+                when (result == pcre2_ERROR_CALLOUT) $
+                    liftIO $ maybeRethrow matchTempEnvRef
+                liftIO $ check (> 0) result
 
-            streamYield matchDataPtr
+                streamYield matchDataPtr
 
-            -- Determine next starting offset
-            nextOff <- liftIO $ do
-                ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
-                curOffEnd <- peekElemOff ovecPtr 1
-                -- Prevent infinite loop upon empty match
-                return $ max curOffEnd (curOff + 1)
+                -- Determine next starting offset
+                nextOff <- liftIO $ do
+                    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+                    curOffEnd <- peekElemOff ovecPtr 1
+                    -- Prevent infinite loop upon empty match
+                    return $ max curOffEnd (curOff + 1)
 
-            -- Handle end of subject
-            when (nextOff > fromIntegral subjCUs) StreamStop
-
-            continue nextOff
+                -- Handle end of subject
+                unless (nextOff > fromIntegral subjCUs) $ continue nextOff
 
     where
     withMatchDataFromCode codePtr action = do
