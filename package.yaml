@@ -38,6 +38,7 @@ library:
   # Per src/c/pcre2/NON-AUTOTOOLS-BUILD
   - src/c/pcre2/src/pcre2_auto_possess.c
   - src/c/pcre2_chartables.c
+  - src/c/pcre2/src/pcre2_chkdint.c
   - src/c/pcre2/src/pcre2_compile.c
   - src/c/pcre2/src/pcre2_config.c
   - src/c/pcre2/src/pcre2_context.c
@@ -67,11 +68,11 @@ library:
   - -W
   - -optc=-DPCRE2_CODE_UNIT_WIDTH=8
   - -optc=-DPCRE2_STATIC=1
+  - -optc=-DSUPPORT_PCRE2_8
   - -optc=-Wno-discarded-qualifiers
   - -optc=-Wno-incompatible-pointer-types
   cc-options:
   - -DHAVE_CONFIG_H
-  - -DPCRE2_CODE_UNIT_WIDTH=8
   - -DHAVE_INTTYPES_H=1
   - -DHAVE_LIMITS_H=1
   - -DHAVE_MEMMOVE_H=1

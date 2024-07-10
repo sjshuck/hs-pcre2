@@ -128,8 +128,8 @@ toCUs = castPtr
 -- ** Lens utilities
 
 -- | A more general `toListOf` that collects targets into any `Alternative`.
-toAlternativeOf :: (Alternative f) => Getting (Alt f a) s a -> s -> f a
-toAlternativeOf l = let alt = Alt . pure in getAlt . view (l . to alt)
+altOf :: (Applicative f) => Getting (Alt f a) s a -> s -> f a
+altOf l = let alt = Alt . pure in getAlt . view (l . to alt)
 
 _Identity :: Lens' (Identity a) a
 _Identity f (Identity x) = Identity <$> f x
@@ -1095,7 +1095,7 @@ captures = capturesOpt mempty
 --
 -- @since 2.0.0
 capturesOpt :: (Alternative f) => Option -> Text -> Text -> f (NonEmpty Text)
-capturesOpt option patt = toAlternativeOf $ _capturesOpt option patt
+capturesOpt option patt = altOf $ _capturesOpt option patt
 
 -- | Does the pattern match the subject at least once?
 matches :: Text -> Text -> Bool
@@ -1117,7 +1117,7 @@ match = matchOpt mempty
 --
 -- @since 2.0.0
 matchOpt :: (Alternative f) => Option -> Text -> Text -> f Text
-matchOpt option patt = toAlternativeOf $ _matchOpt option patt
+matchOpt option patt = altOf $ _matchOpt option patt
 
 -- | Perform at most one substitution.  See
 -- [the docs](https://pcre.org/current/doc/html/pcre2api.html#SEC36) for the

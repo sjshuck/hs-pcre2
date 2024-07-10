@@ -180,12 +180,12 @@ capturesInfoQ s = predictCapturesInfoQ s >>= \case
 
 -- | Helper for `regex` with no parenthesized captures.
 matchTH :: (Alternative f) => Text -> Text -> f Text
-matchTH patt = toAlternativeOf $ _matchTH patt
+matchTH patt = altOf $ _matchTH patt
 
 -- | Helper for `regex` with parenthesized captures.
 capturesTH :: forall info f. (Alternative f) =>
     Text -> Text -> f (Captures info)
-capturesTH patt = toAlternativeOf $ _capturesTH patt
+capturesTH patt = altOf $ _capturesTH patt
 
 -- | Helper for `regex` as a guard pattern.
 matchesTH :: Text -> Text -> Bool

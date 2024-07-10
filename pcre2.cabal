@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.35.1.
+-- This file has been generated from package.yaml by hpack version 0.36.0.
 --
 -- see: https://github.com/sol/hpack
 
@@ -30,11 +30,14 @@ extra-source-files:
     src/c/pcre2/src/pcre2_ucp.h
     src/c/pcre2/src/pcre2posix.h
     src/c/pcre2/src/sljit/sljitConfig.h
+    src/c/pcre2/src/sljit/sljitConfigCPU.h
     src/c/pcre2/src/sljit/sljitConfigInternal.h
     src/c/pcre2/src/sljit/sljitLir.h
+    src/c/pcre2/vms/stdint.h
     src/c/pcre2/maint/ucptest.c
     src/c/pcre2/maint/utf8.c
     src/c/pcre2/src/pcre2_auto_possess.c
+    src/c/pcre2/src/pcre2_chkdint.c
     src/c/pcre2/src/pcre2_compile.c
     src/c/pcre2/src/pcre2_config.c
     src/c/pcre2/src/pcre2_context.c
@@ -72,11 +75,20 @@ extra-source-files:
     src/c/pcre2/src/pcre2posix.c
     src/c/pcre2/src/pcre2posix_test.c
     src/c/pcre2/src/pcre2test.c
-    src/c/pcre2/src/sljit/sljitExecAllocator.c
+    src/c/pcre2/src/sljit/allocator_src/sljitExecAllocatorApple.c
+    src/c/pcre2/src/sljit/allocator_src/sljitExecAllocatorCore.c
+    src/c/pcre2/src/sljit/allocator_src/sljitExecAllocatorFreeBSD.c
+    src/c/pcre2/src/sljit/allocator_src/sljitExecAllocatorPosix.c
+    src/c/pcre2/src/sljit/allocator_src/sljitExecAllocatorWindows.c
+    src/c/pcre2/src/sljit/allocator_src/sljitProtExecAllocatorNetBSD.c
+    src/c/pcre2/src/sljit/allocator_src/sljitProtExecAllocatorPosix.c
+    src/c/pcre2/src/sljit/allocator_src/sljitWXExecAllocatorPosix.c
+    src/c/pcre2/src/sljit/allocator_src/sljitWXExecAllocatorWindows.c
     src/c/pcre2/src/sljit/sljitLir.c
     src/c/pcre2/src/sljit/sljitNativeARM_32.c
     src/c/pcre2/src/sljit/sljitNativeARM_64.c
     src/c/pcre2/src/sljit/sljitNativeARM_T2_32.c
+    src/c/pcre2/src/sljit/sljitNativeLOONGARCH_64.c
     src/c/pcre2/src/sljit/sljitNativeMIPS_32.c
     src/c/pcre2/src/sljit/sljitNativeMIPS_64.c
     src/c/pcre2/src/sljit/sljitNativeMIPS_common.c
@@ -90,9 +102,8 @@ extra-source-files:
     src/c/pcre2/src/sljit/sljitNativeX86_32.c
     src/c/pcre2/src/sljit/sljitNativeX86_64.c
     src/c/pcre2/src/sljit/sljitNativeX86_common.c
-    src/c/pcre2/src/sljit/sljitProtExecAllocator.c
+    src/c/pcre2/src/sljit/sljitSerialize.c
     src/c/pcre2/src/sljit/sljitUtils.c
-    src/c/pcre2/src/sljit/sljitWXExecAllocator.c
     src/c/pcre2_chartables.c
 
 source-repository head
@@ -111,14 +122,15 @@ library
       Paths_pcre2
   hs-source-dirs:
       src/hs
-  ghc-options: -W -optc=-DPCRE2_CODE_UNIT_WIDTH=8 -optc=-DPCRE2_STATIC=1 -optc=-Wno-discarded-qualifiers -optc=-Wno-incompatible-pointer-types
-  cc-options: -DHAVE_CONFIG_H -DPCRE2_CODE_UNIT_WIDTH=8 -DHAVE_INTTYPES_H=1 -DHAVE_LIMITS_H=1 -DHAVE_MEMMOVE_H=1 -DHAVE_STDINT_H=1 -DHAVE_STDLIB_H=1 -DHAVE_STRERROR_H=1 -DHAVE_STRING_H=1 -DSUPPORT_JIT=1 -DSUPPORT_UNICODE=1
+  ghc-options: -W -optc=-DPCRE2_CODE_UNIT_WIDTH=8 -optc=-DPCRE2_STATIC=1 -optc=-DSUPPORT_PCRE2_8 -optc=-Wno-discarded-qualifiers -optc=-Wno-incompatible-pointer-types
+  cc-options: -DHAVE_CONFIG_H -DHAVE_INTTYPES_H=1 -DHAVE_LIMITS_H=1 -DHAVE_MEMMOVE_H=1 -DHAVE_STDINT_H=1 -DHAVE_STDLIB_H=1 -DHAVE_STRERROR_H=1 -DHAVE_STRING_H=1 -DSUPPORT_JIT=1 -DSUPPORT_UNICODE=1
   include-dirs:
       src/c
       src/c/pcre2/src
   c-sources:
       src/c/pcre2/src/pcre2_auto_possess.c
       src/c/pcre2_chartables.c
+      src/c/pcre2/src/pcre2_chkdint.c
       src/c/pcre2/src/pcre2_compile.c
       src/c/pcre2/src/pcre2_config.c
       src/c/pcre2/src/pcre2_context.c
