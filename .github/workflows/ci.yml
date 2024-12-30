@@ -38,11 +38,12 @@ jobs:
         run: cabal build
       - name: Run tests
         run: cabal test --test-show-details=direct
-      - name: Build benchmarks
-        run: cabal build --enable-benchmarks
+      # TODO Re-enable benchmarks after https://github.com/haskellari/microstache/issues/43 is done
+      #- name: Build benchmarks
+        #run: cabal build --enable-benchmarks
         # pcre (via pcre-light) not available on windows (without further setup)
         # Also not building on macOS
-        if: runner.os == 'Linux'
+        #if: runner.os == 'Linux'
       - name: Build documentation
         run: cabal haddock
   stack:
