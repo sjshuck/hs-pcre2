@@ -63,6 +63,10 @@ main = hspec $ do
             matchesOpt (Bsr BsrUnicode) "\\R$" "line separator: \x2028"
                 `shouldBe` True
 
+        it ("produces well-formed UTF-8 matches" `issue` 39) $ do
+            length (captures @[] ".*" $ Text.replicate 10000 "a\n")
+                `shouldBe` 1
+
     describe "lens-powered matching" $ do
         let _nee :: Traversal' Text Text
             _nee = _matchOpt (Caseless <> MatchWord) "nee"
