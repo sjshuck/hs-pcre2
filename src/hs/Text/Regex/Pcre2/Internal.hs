@@ -34,6 +34,14 @@ import           Lens.Micro.Extras          (preview, view)
 import           System.IO.Unsafe           (unsafePerformIO)
 import           Text.Regex.Pcre2.Foreign
 
+import Foreign.C.Types (CSize(..))
+import Text.Printf (printf)
+import Data.List (isPrefixOf)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import qualified Data.Sequence as Seq
+import Data.Sequence (Seq(..))
+
 -- * General utilities
 
 type FfiWrapper f = f -> IO (FunPtr f)
@@ -524,7 +532,7 @@ applyOption = \case
 
     where
     unary ctor f x = [ctor $ \ctx -> withForeignPtr ctx applyAndCheck] where
-        applyAndCheck ctxPtr = f ctxPtr x >>= check (== 0)
+        applyAndCheck ctxPtr = usingFor "updating context" ctxPtr >>= flip f x >>= check (== 0)
 
 -- | Intermediate representation of options expressing what effect they'll have
 -- on which stage of regex compilation\/execution.  Also provide fake @Prism'@s.
@@ -569,6 +577,8 @@ extractOptsOf :: Getting (First a) AppliedOption a -> ExtractOpts [a]
 extractOptsOf prism = state $ partitionEithers . map discrim where
     discrim opt = maybe (Right opt) Left $ opt ^? prism
 
+compile_context_genlCtxPtr = mkGenlCtxPtr "pcre2_compile_context"
+
 -- | Prepare to compile a `Code`.
 extractCompileEnv :: ExtractOpts CompileEnv
 extractCompileEnv = do
@@ -576,33 +586,28 @@ extractCompileEnv = do
     xtraOpts <- bitOr <$> extractOptsOf _CompileExtraOption
     recGuard <- preview _last <$> extractOptsOf _CompileRecGuardOption
 
-    if null ctxUpds && xtraOpts == 0 && null recGuard
-        then return CompileEnv{
-            compileEnvCtx  = Nothing,
-            compileEnvERef = Nothing}
+    liftIO $ do
+        ctx <- mkForeignPtr pcre2_compile_context_free $
+            pcre2_compile_context_create compile_context_genlCtxPtr
 
-        else liftIO $ do
-            ctx <- mkForeignPtr pcre2_compile_context_free $
-                pcre2_compile_context_create nullPtr
+        forM_ ctxUpds $ \update -> update ctx
 
-            forM_ ctxUpds $ \update -> update ctx
+        when (xtraOpts /= 0) $ withForeignPtr ctx $ \ctxPtr ->
+            pcre2_set_compile_extra_options ctxPtr xtraOpts >>= check (== 0)
 
-            when (xtraOpts /= 0) $ withForeignPtr ctx $ \ctxPtr ->
-                pcre2_set_compile_extra_options ctxPtr xtraOpts >>= check (== 0)
+        compileEnvERef <- forM recGuard $ \f -> do
+            eRef <- newIORef Nothing
+            funPtr <- mkFunPtr ctx $ mkRecursionGuard $ \depth _ -> do
+                resultOrE <- try $ f (fromIntegral depth) >>= evaluate
+                case resultOrE of
+                    Right success -> return $ if success then 0 else 1
+                    Left e        -> writeIORef eRef (Just e) >> return 1
+            withForeignPtr ctx $ \ctxPtr ->
+                pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>=
+                    check (== 0)
+            return eRef
 
-            compileEnvERef <- forM recGuard $ \f -> do
-                eRef <- newIORef Nothing
-                funPtr <- mkFunPtr ctx $ mkRecursionGuard $ \depth _ -> do
-                    resultOrE <- try $ f (fromIntegral depth) >>= evaluate
-                    case resultOrE of
-                        Right success -> return $ if success then 0 else 1
-                        Left e        -> writeIORef eRef (Just e) >> return 1
-                withForeignPtr ctx $ \ctxPtr ->
-                    pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>=
-                        check (== 0)
-                return eRef
-
-            return CompileEnv{compileEnvCtx = Just ctx, ..}
+        return CompileEnv{compileEnvCtx = Just ctx, ..}
 
 -- | Inputs to `Code` compilation besides the pattern.
 data CompileEnv = CompileEnv{
@@ -648,16 +653,17 @@ data MatchEnv = MatchEnv{
     matchEnvCallout    :: Maybe (CalloutInfo -> IO CalloutResult),
     matchEnvSubCallout :: Maybe (SubCalloutInfo -> IO SubCalloutResult)}
 
+match_context_genlCtxPtr = mkGenlCtxPtr "pcre2_match_context"
+
 -- | Prepare a matching function after compiling the underlying @pcre2_code@.
 extractMatchEnv :: Code -> ExtractOpts MatchEnv
 extractMatchEnv matchEnvCode = do
     matchEnvOpts <- bitOr <$> extractOptsOf _MatchOption
 
     matchEnvCtx <- extractOptsOf _MatchContextOption >>= \case
-        []      -> return Nothing
         ctxUpds -> liftIO $ Just <$> do
             ctx <- mkForeignPtr pcre2_match_context_free $
-                pcre2_match_context_create nullPtr
+                pcre2_match_context_create match_context_genlCtxPtr
             forM_ ctxUpds $ \update -> update ctx
             return ctx
 
@@ -685,7 +691,9 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $
 
         -- Loop over the subject, emitting match data until stopping.
         return $ fix1 0 $ \continue curOff -> do
-            result <- liftIO $ withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
+            result <- liftIO $ withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr -> do
+                codePtr <- usingFor "pcre2_match" codePtr
+                matchDataPtr <- usingFor "pcre2_match" matchDataPtr
                 pcre2_match
                     codePtr
                     (toCUs subjPtr)
@@ -701,11 +709,11 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $
                     liftIO $ maybeRethrow matchTempEnvRef
                 liftIO $ check (> 0) result
 
-                streamYield matchDataPtr
+                liftIO (usingFor "streamYield" matchDataPtr) >>= streamYield
 
                 -- Determine next starting offset
                 nextOff <- liftIO $ do
-                    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+                    ovecPtr <- usingFor "pcre2_get_ovector_pointer" matchDataPtr >>= pcre2_get_ovector_pointer
                     curOffEnd <- peekElemOff ovecPtr 1
                     -- Prevent infinite loop upon empty match
                     return $ max curOffEnd (curOff + 1)
@@ -716,8 +724,10 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $
     where
     withMatchDataFromCode codePtr action = do
         matchData <- mkForeignPtr pcre2_match_data_free $
-            pcre2_match_data_create_from_pattern codePtr nullPtr
+            pcre2_match_data_create_from_pattern codePtr match_data_genlCtxPtr
         withForeignPtr matchData action
+
+match_data_genlCtxPtr = mkGenlCtxPtr "pcre2_match_data"
 
 -- | Helper to generate public matching functions.
 pureUserMatcher :: Option -> Text -> Matcher
@@ -831,7 +841,7 @@ mkMatchTempEnv MatchEnv{..} subject
 
         ctx <- mkForeignPtr pcre2_match_context_free $ case matchEnvCtx of
             -- No pre-existing match context, so create one afresh.
-            Nothing -> pcre2_match_context_create nullPtr
+            Nothing -> pcre2_match_context_create match_context_genlCtxPtr
             -- Pre-existing match context, so copy it.
             Just ctx -> withForeignPtr ctx pcre2_match_context_copy
 
@@ -901,6 +911,70 @@ foreign import ccall "wrapper" mkRecursionGuard :: FfiWrapper
 
 foreign import ccall "wrapper" mkCallout :: FfiWrapper
     (Ptr block -> Ptr a -> IO CInt)
+
+foreign import ccall "wrapper" mkMalloc :: FfiWrapper
+    (CSize -> Ptr a -> IO (Ptr b))
+foreign import ccall "wrapper" mkFree :: FfiWrapper
+    (Ptr b -> Ptr a -> IO ())
+
+memoryLog :: IORef (Map (Ptr ()) (Seq String))
+memoryLog = unsafePerformIO $ newIORef Map.empty
+{-# NOINLINE memoryLog #-}
+
+allocated :: Seq String -> Bool
+allocated already = any ("malloc()" `isPrefixOf`) $ preview _last $
+    filter (\msg -> "malloc()" `isPrefixOf` msg || "free()" `isPrefixOf` msg) $
+        toList already
+
+mkGenlCtxPtr :: String -> Ptr Pcre2_general_context
+mkGenlCtxPtr purpose = unsafePerformIO $ do
+    debugMalloc <- mkMalloc $ \sz _ -> do
+        ptr <- mallocBytes $ fromIntegral sz
+        atomicModifyIORef' memoryLog $ \ptrs ->
+            (Map.insertWith (flip (Seq.><)) (castPtr ptr) (Seq.singleton $ "malloc() for " ++ purpose) ptrs, ptr)
+    debugFree <- mkFree $ \ptr _ -> when (ptr /= nullPtr) $ do
+        let msg = "free() for " ++ purpose
+        already <- atomicModifyIORef' memoryLog $ \ptrs ->
+            let (already, ptrs') = Map.alterF
+                    (\already ->
+                        let already' = fromMaybe Seq.empty already
+                        in (already', Just $ already' :|> msg))
+                    (castPtr ptr)
+                    ptrs
+            in (ptrs', already)
+        unless (allocated already) $ do
+            printf
+                "****** pcre2_general_context for %s trying to free() unallocated %s ******\n"
+                purpose
+                (show ptr)
+            forM_ (toList already ++ [msg]) $ \msg -> putStrLn $ "    " ++ msg
+        free ptr
+    pcre2_general_context_create debugMalloc debugFree nullPtr
+
+usingFor :: String -> Ptr a -> IO (Ptr a)
+usingFor purpose ptr
+    | ptr == nullPtr = return ptr
+    | otherwise      = do
+        let msg = "using for " ++ purpose
+        already <- atomicModifyIORef' memoryLog $ \ptrs ->
+            let (already, ptrs') = Map.alterF
+                    (\already ->
+                        let already' = fromMaybe Seq.empty already
+                        in (already', Just $ already' :|> msg))
+                    (castPtr ptr)
+                    ptrs
+            in (ptrs', already)
+        unless (allocated already) $ error $ unlines $
+            printf
+                "****** Using deallocated %s for %s ******"
+                (show ptr)
+                purpose :
+            let len = Seq.length already
+                abbrev
+                    | len > 15  = \msgs -> take 5 msgs ++ "..." : drop (len - 5) msgs
+                    | otherwise = id
+            in map ("    " ++) $ abbrev $ toList already ++ [msg]
+        return ptr
 
 -- | Within a callout, marshal the original subject and @pcre2_callout_block@
 -- data to Haskell and present to the user function.  Ensure no pointers are
@@ -1035,7 +1109,7 @@ type FromMatch t = Ptr Pcre2_match_data -> IO (t Slice)
 -- | Read all specifically indexed captures' offsets from match results.
 getWhitelistedSlices :: (Traversable t) => t Int -> FromMatch t
 getWhitelistedSlices whitelist matchDataPtr = do
-    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+    ovecPtr <- usingFor "pcre2_get_ovector_pointer" matchDataPtr >>= pcre2_get_ovector_pointer
     let peekOvec :: Int -> IO Text.I8
         peekOvec = fmap fromIntegral . peekElemOff ovecPtr
 
@@ -1050,7 +1124,7 @@ get0thSlice = getWhitelistedSlices $ Identity 0
 -- | Read all captures' offsets from match results.
 getAllSlices :: FromMatch NonEmpty
 getAllSlices matchDataPtr = do
-    count <- fromIntegral <$> pcre2_get_ovector_count matchDataPtr
+    count <- usingFor "pcre2_get_ovector_pointer" matchDataPtr >>= fmap fromIntegral . pcre2_get_ovector_count
     let whitelist = 0 :| [1 .. count - 1]
 
     getWhitelistedSlices whitelist matchDataPtr
