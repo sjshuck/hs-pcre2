@@ -46,7 +46,7 @@ import           Text.Regex.Pcre2.Internal
 -- This type is only intended to be created by `regex`\/`_regex` and consumed by
 -- `capture`\/`_capture`, relying on type inference.  Specifying the @info@
 -- explicitly in a type signature is not supported&#x2014;the definition of
--- `CapturesInfo` is not part of the public API and may change without warning.
+-- `CapturesInfo` is not part of the public API and may change.
 --
 -- After obtaining `Captures` it's recommended to immediately consume them and
 -- transform them into application-level data, to avoid leaking the types.
@@ -78,9 +78,9 @@ type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
 -- | Safely lookup a capture in a `Captures` result obtained from a Template
 -- Haskell-generated matching function.
 --
--- The ugly type signature may be interpreted like this:  /Given some capture/
--- /group index @i@ and some @info@ about a regex, ensure that index exists and/
--- /is resolved to the number @num@ at compile time.  Then, at runtime, get a/
+-- The type signature may be interpreted like this:  /Given some capture group/
+-- /index @i@ and some @info@ about a regex, ensure that index exists and is/
+-- /resolved to the number @num@ at compile time.  Then, at runtime, get a/
 -- /capture group (numbered @num@) from a list of (at least @num@) captures./
 --
 -- In practice the variable @i@ is specified by type application and the other
@@ -89,7 +89,7 @@ type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
 -- > capture @3
 -- > capture @"bar"
 --
--- Specifying a nonexistent number or name will result in a type error.
+-- Specifying an invalid index will result in a type error.
 capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
     Captures info -> Text
 capture = view $ _capture @i
@@ -223,7 +223,7 @@ mkQuoteExp matchE capturesE s = regexQ `appE` textQ s where
 -- regex :: (`Alternative` f) => String -> Text -> f (`Captures` info)
 -- @
 --
--- in the presence of parenthesized captures, or
+-- if there are parenthesized captures, or
 --
 -- > regex :: (Alternative f) => String -> Text -> f Text
 --
@@ -239,13 +239,13 @@ mkQuoteExp matchE capturesE s = regexQ `appE` textQ s where
 -- >             year = read @Int $ Text.unpack $ capture @"y" cs
 -- >             ...
 --
--- > forM_ ([regex|\s+$|] line :: Maybe Text) $ \spaces -> error $
--- >     "line has trailing spaces (" ++ show (Text.length spaces) ++ " characters)"
+-- > forM_ @Maybe ([regex|\s+$|] line) $ \spaces ->
+-- >     printf "line has trailing spaces (%d characters)\n" (Text.length spaces)
 --
 -- === As a pattern
 --
--- This matches when the regex first matches, whereupon any named captures are
--- bound to variables of the same names.
+-- This matches when the regex first matches.  Any named captures are bound to
+-- variables of the same names.
 --
 -- > case "submitted 2020-10-20" of
 -- >     [regex|(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})|] ->

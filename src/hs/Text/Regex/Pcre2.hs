@@ -6,11 +6,11 @@ module Text.Regex.Pcre2 (
     Atop the low-level binding to the C API, we present a high-level interface
     to add regular expressions to Haskell programs.
 
-    All input and output strings are strict `Data.Text.Text`, which maps
-    directly to how PCRE2 operates on strings of 8-bit-wide code units.
+    All input and output strings are strict `Data.Text.Text`, which maps to how
+    PCRE2 operates in UTF-8 mode.
 
     The C API requires pattern strings to be compiled and the compiled patterns
-    to be executed on subject strings in discrete steps.  We hide this
+    to be executed on subject strings in discrete steps.  We simplify this
     procedure, accepting pattern and subject as arguments in a single function,
     essentially:
 
@@ -53,10 +53,10 @@ module Text.Regex.Pcre2 (
     [Subject]:  The string the compiled regular expression is executed on.
 
     [Regex]:  A function of the form @`Data.Text.Text` -> result@, where the
-    argument is the subject.  It is \"compiled\" via partial application as
-    discussed above.  (Lens users:  A regex has the more abstract form
-    @`Lens.Micro.Traversal'` `Data.Text.Text` result@, but the concept is the
-    same.)
+    argument is the subject.  It is \"compiled\" in the course of producing
+    results and may be reused via partial application as discussed above.  (Lens
+    users:  A regex has the more abstract form @`Lens.Micro.Traversal'`
+    `Data.Text.Text` result@, but the concept is the same.)
 
     [Capture (or capture group)]:  Any substrings of the subject matched by the
     pattern, meaning the whole pattern and any parenthesized groupings.  The
@@ -76,47 +76,14 @@ module Text.Regex.Pcre2 (
     @(?\<foo\>...)@.  Whether they have names or not, captures are always
     numbered as described above.
 
-    === __Performance__
-
-    Each API function is designed such that, when a regex is obtained, the
-    underlying C data generated from the pattern and any options is reused for
-    that regex's lifetime.  Care should be taken that the same regex is not
-    recreated /ex nihilo/ and discarded for each new subject:
-
-    > isEmptyOrHas2Digits :: Text -> Bool
-    > isEmptyOrHas2Digits s = Text.null s || matches "\\d{2}" s -- bad, fully applied
-
-    Instead, store it in a partially applied state:
-
-    > isEmptyOrHas2Digits = (||) <$> Text.null <*> matches "\\d{2}" -- OK but abstruse
-
-    When in doubt, always create regexes as top-level values:
-
-    > has2Digits :: Text -> Bool
-    > has2Digits = matches "\\d{2}"
-    >
-    > isEmptyOrHas2Digits s = Text.null s || has2Digits s -- good
-
-    Note: Template Haskell regexes are immune from this problem and may be
-    freely inlined; see below.
-
-    Also of note is the optimization that, for each capture that's more than
-    half the length of the subject, a zero-copy `Data.Text.Text` is produced in
-    constant time and space.  This can yield a large performance boost in many
-    cases, for example when splitting lines into key-value pairs as in
-    the [teaser](https://github.com/sjshuck/hs-pcre2#teasers).  A downside,
-    however, is that retaining these slices in memory will carry the overhead
-    of the dead portions of the subject (still guaranteed to be less than the
-    slices in total size).
-
     === __Handling results and errors__
 
     In contrast to [other](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/match)
     [APIs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/matchAll)
     where there are separate functions to request single versus global matching,
-    we accomplish this /(since 2.0.0)/ in a unified fashion using the
-    `Control.Applicative.Alternative` typeclass.  Typically the user will
-    choose from two instances, `Maybe` and @[]@:
+    we accomplish this in a unified fashion using the
+    `Control.Applicative.Alternative` typeclass /(since 2.0.0)/.  Typically the
+    user will choose from two instances, `Maybe` and @[]@:
 
     > b2 :: (Alternative f) => Text -> f Text
     > b2 = match "b.."
@@ -129,11 +96,7 @@ module Text.Regex.Pcre2 (
     > findAllB2s :: Text -> [Text]
     > findAllB2s = b2
 
-    Other instances exist for niche uses,
-    notably @[STM](https://hackage.haskell.org/package/stm/docs/Control-Monad-STM.html#t:STM)@,
-    that of [optparse-applicative](https://hackage.haskell.org/package/optparse-applicative/docs/Options-Applicative.html#t:Parser),
-    and those of parser combinator libraries such
-    as [megaparsec](https://hackage.haskell.org/package/megaparsec/docs/Text-Megaparsec.html#t:ParsecT).
+    Other instances exist for niche uses, such as @[STM](https://hackage.haskell.org/package/stm/docs/Control-Monad-STM.html#t:STM)@.
 
     By contrast, user errors are thrown purely.  If a user error is to be
     caught, it must be at the site where the match or substitution results are
@@ -175,8 +138,8 @@ module Text.Regex.Pcre2 (
     --
     -- 1.  A basic working understanding of optics.  Many tutorials exist
     -- online, such as
-    -- [this](https://hackage.haskell.org/package/lens-tutorial-1.0.4/docs/Control-Lens-Tutorial.html),
-    -- and videos such as [this](https://www.youtube.com/watch?v=7fbziKgQjnw).
+    -- [this](https://hackage.haskell.org/package/lens-tutorial-1.0.5/docs/Control-Lens-Tutorial.html),
+    -- and videos such as [this](https://www.youtube.com/watch?v=geV8F59q48E).
     --
     -- 2.  A library providing combinators.  For lens newcomers, it is
     -- recommended to grab
@@ -190,8 +153,7 @@ module Text.Regex.Pcre2 (
     -- full [lens](https://hackage.haskell.org/package/lens) library.
     --
     -- We expose a set of traversals that focus on matched substrings within a
-    -- subject.  Like the basic functional regexes, they should be \"compiled\"
-    -- and memoized, rather than created inline.
+    -- subject.
     --
     -- > _nee :: Traversal' Text Text
     -- > _nee = _matchOpt (Caseless <> MatchWord) "nee"
@@ -215,8 +177,7 @@ module Text.Regex.Pcre2 (
 
     -- * Compile-time validation
     --
-    -- | Despite whatever virtues, the API thus far has some fragility arising
-    -- from various scenarios:
+    -- | The API thus far has some hazards:
     --
     -- * pattern malformation such as mismatched parentheses /(runtime error)/
     --
@@ -234,8 +195,8 @@ module Text.Regex.Pcre2 (
     -- backslash requires the sequence @\"\\\\\\\\\"@!
     --
     -- Using a combination of language extensions and pattern introspection
-    -- features, we provide a Template Haskell API to mitigate these scenarios.
-    -- To make use of it these must be enabled:
+    -- features, we provide a Template Haskell API to mitigate these.  To make
+    -- use of it these must be enabled:
     --
     -- +--------------------+---------------------------------------+------------------------------+
     -- | Extension          | Required for                          | When                         |
@@ -258,7 +219,7 @@ module Text.Regex.Pcre2 (
     -- +--------------------+---------------------------------------+------------------------------+
     --
     -- The inspiration for this portion of the library is Ruby, which supports
-    -- regular expressions with [superior ergonomics](https://ruby-doc.org/core-2.7.2/Regexp.html#class-Regexp-label-Capturing).
+    -- regular expressions with [superior ergonomics](https://docs.ruby-lang.org/en/master/Regexp.html#class-Regexp-label-Named+Captures).
 
     -- ** Quasi-quoters
     regex,

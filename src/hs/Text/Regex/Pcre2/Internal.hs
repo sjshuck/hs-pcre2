@@ -181,8 +181,8 @@ unsafeLazyStreamToList = fix $ \continue -> \case
 type Matcher = Text -> Stream MatchData IO ()
 
 -- | A substitution function.  It takes a subject and produces the number of
--- substitutions performed (0 or 1, or more in the presence of `SubGlobal`)
--- along with the transformed subject.  Currently the number is unused.
+-- substitutions performed (0 or 1, or more if `SubGlobal`) along with the
+-- transformed subject.  Currently the number is unused.
 type Subber = Text -> IO (CInt, Text)
 
 -- ** Options
@@ -1107,7 +1107,7 @@ matchOpt option patt = altOf $ _matchOpt option patt
 -- [the docs](https://pcre.org/current/doc/html/pcre2api.html#SEC36) for the
 -- special syntax of /replacement/.
 --
--- >>> sub "(\\w+) calling the (\\w+)" "$2 calling the $1" "the pot calling the kettle black"
+-- >>> sub "\\b(\\w+) calling the (\\w+)\\b" "$2 calling the $1" "the pot calling the kettle black"
 -- "the kettle calling the pot black"
 sub
     :: Text -- ^ pattern
