@@ -26,7 +26,6 @@ import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
 import qualified Data.Text.Foreign          as Text
 import           Data.Typeable              (cast)
-import           Data.Void                  (Void, absurd)
 import           Foreign
 import           Foreign.C.Types            (CInt(..), CUChar, CUInt(..))
 import qualified Foreign.Concurrent         as Conc
@@ -77,14 +76,6 @@ unchompedLines s = case break (== '\n') s of
 fix1 :: a -> ((a -> b) -> a -> b) -> b
 fix1 x f = fix f x
 
--- | Like `fix1`, but for a function of two arguments.  Currently unused.
-fix2 :: a -> b -> ((a -> b -> c) -> a -> b -> c) -> c
-fix2 x y f = fix f x y
-
--- | Like `fix1`, but for a function of three arguments.  Currently unused.
-fix3 :: a -> b -> c -> ((a -> b -> c -> d) -> a -> b -> c -> d) -> d
-fix3 x y z f = fix f x y z
-
 -- ** Fast @Text@ slicing
 
 data Slice = Slice
@@ -113,9 +104,9 @@ smartSlice text slice = fromMaybe Text.empty $ maybeSmartSlice text slice
 -- forced when the outer `Maybe` constructor is forced.
 maybeSmartSlice :: Text -> Slice -> Maybe Text
 maybeSmartSlice text slice = f <$!> maybeThinSlice text slice where
-    f substring
-        | Text.length substring > Text.length text `div` 2 = substring
-        | otherwise                                        = Text.copy substring
+    f substring = if Text.lengthWord8 substring > Text.lengthWord8 text `div` 2
+        then substring
+        else Text.copy substring
 
 -- | Safe, type-restricted `castPtr`.
 fromCUs :: Ptr CUChar -> Ptr Word8
@@ -136,12 +127,11 @@ _Identity f (Identity x) = Identity <$> f x
 
 -- ** Streaming support
 
--- | A @FreeT@-style stream that can short-circuit.
+-- | A @FreeT@-style stream.
 data Stream b m a
     = StreamPure a
     | StreamYield b (Stream b m a)    -- ^ Yield a value and keep going.
     | StreamEffect (m (Stream b m a)) -- ^ Have an effect and keep going.
-    | StreamStop                      -- ^ Short-circuit.
     deriving (Functor)
 
 instance (Functor m) => Applicative (Stream b m) where
@@ -149,13 +139,11 @@ instance (Functor m) => Applicative (Stream b m) where
     StreamPure f     <*> sx = f <$> sx
     StreamYield y sf <*> sx = StreamYield y $ sf <*> sx
     StreamEffect msf <*> sx = StreamEffect $ msf <&> (<*> sx)
-    StreamStop       <*> _  = StreamStop
 
 instance (Functor m) => Monad (Stream b m) where
     StreamPure x     >>= f = f x
     StreamYield y sx >>= f = StreamYield y $ sx >>= f
     StreamEffect msx >>= f = StreamEffect $ msx <&> (>>= f)
-    StreamStop       >>= _ = StreamStop
 
 instance MonadTrans (Stream b) where
     lift = StreamEffect . fmap StreamPure
@@ -172,17 +160,13 @@ mapMS f = fix $ \go -> \case
     StreamPure x     -> StreamPure x
     StreamYield y sx -> StreamEffect $ f y <&> \y' -> StreamYield y' $ go sx
     StreamEffect ms  -> StreamEffect $ go <$> ms
-    StreamStop       -> StreamStop
 
 -- | Unsafely, lazily tear down a `Stream` into a pure list of values yielded.
--- The stream must be infinite in the sense of it only terminating due to
--- explicit `StreamStop`.
-unsafeLazyStreamToList :: Stream b IO Void -> [b]
+unsafeLazyStreamToList :: Stream b IO a -> [b]
 unsafeLazyStreamToList = fix $ \continue -> \case
-    StreamPure v    -> absurd v
+    StreamPure _    -> []
     StreamYield y s -> y : continue s
     StreamEffect ms -> continue $ unsafePerformIO ms
-    StreamStop      -> []
 
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
@@ -190,11 +174,11 @@ unsafeLazyStreamToList = fix $ \continue -> \case
 -- been \"compiled\".  It takes a subject a produces a stream of match results
 -- corresponding to a global match.
 --
--- The actual values of type @Ptr Pcre2_match_data@ will be equal within each
--- global match; they represent the states of the C data at moments in time, and
--- are intended to be composed with another streaming transformation before
--- being subjected to teardown and `unsafePerformIO`.
-type Matcher = Text -> Stream (Ptr Pcre2_match_data) IO Void
+-- The actual yielded match data references will be equal within each global
+-- match; they represent the states of the C data at moments in time, and are
+-- intended to be composed with another streaming transformation before being
+-- subjected to teardown and `unsafePerformIO`.
+type Matcher = Text -> Stream MatchData IO ()
 
 -- | A substitution function.  It takes a subject and produces the number of
 -- substitutions performed (0 or 1, or more in the presence of `SubGlobal`)
@@ -695,48 +679,46 @@ userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
 -- | A `MatchEnv` is sufficient to fully implement a matching function.
 matcherWithEnv :: MatchEnv -> Matcher
 matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $
-    withForeignPtr matchEnvCode $ \codePtr ->
-    withMatchDataFromCode codePtr $ \matchDataPtr ->
-    Text.useAsPtr subject $ \subjPtr subjCUs -> do
+    withForeignPtr matchEnvCode $ \codePtr -> do
+        (subjForeignPtr, subjCUs) <- Text.asForeignPtr subject
+        matchData <- mkForeignPtr pcre2_match_data_free $
+            pcre2_match_data_create_from_pattern codePtr nullPtr
         MatchTempEnv{..} <- mkMatchTempEnv matchEnv subject
 
         -- Loop over the subject, emitting match data until stopping.
         return $ fix1 0 $ \continue curOff -> do
-            result <- liftIO $ withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
-                pcre2_match
-                    codePtr
-                    (toCUs subjPtr)
-                    (fromIntegral subjCUs)
-                    curOff
-                    matchEnvOpts
-                    matchDataPtr
-                    ctxPtr
+            result <- liftIO $
+                withForeignPtr matchEnvCode $ \codePtr ->
+                withForeignPtr subjForeignPtr $ \subjPtr ->
+                withForeignPtr matchData $ \matchDataPtr ->
+                withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
+                    pcre2_match
+                        codePtr
+                        (toCUs subjPtr)
+                        (fromIntegral subjCUs)
+                        curOff
+                        matchEnvOpts
+                        matchDataPtr
+                        ctxPtr
 
             -- Handle no match and errors
-            when (result == pcre2_ERROR_NOMATCH) StreamStop
-            when (result == pcre2_ERROR_CALLOUT) $
-                liftIO $ maybeRethrow matchTempEnvRef
-            liftIO $ check (> 0) result
+            unless (result == pcre2_ERROR_NOMATCH) $ do
+                when (result == pcre2_ERROR_CALLOUT) $
+                    liftIO $ maybeRethrow matchTempEnvRef
+                liftIO $ check (> 0) result
 
-            streamYield matchDataPtr
+                streamYield matchData
 
-            -- Determine next starting offset
-            nextOff <- liftIO $ do
-                ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
-                curOffEnd <- peekElemOff ovecPtr 1
-                -- Prevent infinite loop upon empty match
-                return $ max curOffEnd (curOff + 1)
+                -- Determine next starting offset
+                nextOff <- liftIO $ do
+                    ovecPtr <- withForeignPtr matchData
+                        pcre2_get_ovector_pointer
+                    curOffEnd <- peekElemOff ovecPtr 1
+                    -- Prevent infinite loop upon empty match
+                    return $ max curOffEnd (curOff + 1)
 
-            -- Handle end of subject
-            when (nextOff > fromIntegral subjCUs) StreamStop
-
-            continue nextOff
-
-    where
-    withMatchDataFromCode codePtr action = do
-        matchData <- mkForeignPtr pcre2_match_data_free $
-            pcre2_match_data_create_from_pattern codePtr nullPtr
-        withForeignPtr matchData action
+                -- Handle end of subject
+                unless (nextOff > fromIntegral subjCUs) $ continue nextOff
 
 -- | Helper to generate public matching functions.
 pureUserMatcher :: Option -> Text -> Matcher
@@ -821,7 +803,7 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
 
     where
     -- Guess the size of the output to be <= 2x that of the subject.
-    initOutLen = Text.length subject * 2
+    initOutLen = Text.lengthWord8 subject * 2
 
 -- | Helper to generate substitution function.  For consistency with
 -- `pureUserMatcher`.
@@ -1027,7 +1009,7 @@ _gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
             -- going, remembering where we are now.
             thinSlice subject (Slice prevOffEnd off) : c' : r offEnd
     termSegments off =
-        let offEnd = fromIntegral $ Text.length subject
+        let offEnd = fromIntegral $ Text.lengthWord8 subject
         -- If the terminal segment is empty, omit it altogether.  That way,
         -- Text.concat can just return the subject without copying anything in
         -- cases where no substring is changed.
@@ -1049,18 +1031,19 @@ _gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
 --
 -- * @[]@ when we want to easily pattern match specific capture groups via
 --   Template Haskell-generated @ViewPatterns@.
-type FromMatch t = Ptr Pcre2_match_data -> IO (t Slice)
+type FromMatch t = MatchData -> IO (t Slice)
 
 -- | Read all specifically indexed captures' offsets from match results.
 getWhitelistedSlices :: (Traversable t) => t Int -> FromMatch t
-getWhitelistedSlices whitelist matchDataPtr = do
-    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
-    let peekOvec :: Int -> IO Text.I8
-        peekOvec = fmap fromIntegral . peekElemOff ovecPtr
+getWhitelistedSlices whitelist matchData =
+    withForeignPtr matchData $ \matchDataPtr -> do
+        ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+        let peekOvec :: Int -> IO Text.I8
+            peekOvec = fmap fromIntegral . peekElemOff ovecPtr
 
-    forM whitelist $ \i -> Slice
-        <$> peekOvec (i * 2)
-        <*> peekOvec (i * 2 + 1)
+        forM whitelist $ \i -> Slice
+            <$> peekOvec (i * 2)
+            <*> peekOvec (i * 2 + 1)
 
 -- | Read just the 0th capture's offsets from match results.
 get0thSlice :: FromMatch Identity
@@ -1068,11 +1051,11 @@ get0thSlice = getWhitelistedSlices $ Identity 0
 
 -- | Read all captures' offsets from match results.
 getAllSlices :: FromMatch NonEmpty
-getAllSlices matchDataPtr = do
-    count <- fromIntegral <$> pcre2_get_ovector_count matchDataPtr
+getAllSlices matchData = do
+    count <- fromIntegral <$> withForeignPtr matchData pcre2_get_ovector_count
     let whitelist = 0 :| [1 .. count - 1]
 
-    getWhitelistedSlices whitelist matchDataPtr
+    getWhitelistedSlices whitelist matchData
 
 -- | Placeholder for building a `Traversal'` to be passed to `has`.
 getNoSlices :: FromMatch Proxy
@@ -1230,6 +1213,7 @@ instance Show Pcre2CompileException where
         where
         tab = 20
         pattLinesMaybeWithCaret
+            -- FIXME Do not use Text.length since offsets are in code units
             | offset' == Text.length patt = pattLines
             | otherwise                   = insertCaretLine numberedPattLines
         offset' = fromIntegral offset
