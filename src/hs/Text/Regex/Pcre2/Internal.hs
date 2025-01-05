@@ -104,9 +104,9 @@ smartSlice text slice = fromMaybe Text.empty $ maybeSmartSlice text slice
 -- forced when the outer `Maybe` constructor is forced.
 maybeSmartSlice :: Text -> Slice -> Maybe Text
 maybeSmartSlice text slice = f <$!> maybeThinSlice text slice where
-    f substring
-        | Text.length substring > Text.length text `div` 2 = substring
-        | otherwise                                        = Text.copy substring
+    f substring = if Text.lengthWord8 substring > Text.lengthWord8 text `div` 2
+        then substring
+        else Text.copy substring
 
 -- | Safe, type-restricted `castPtr`.
 fromCUs :: Ptr CUChar -> Ptr Word8
@@ -802,7 +802,7 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
 
     where
     -- Guess the size of the output to be <= 2x that of the subject.
-    initOutLen = Text.length subject * 2
+    initOutLen = Text.lengthWord8 subject * 2
 
 -- | Helper to generate substitution function.  For consistency with
 -- `pureUserMatcher`.
@@ -1008,7 +1008,7 @@ _gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
             -- going, remembering where we are now.
             thinSlice subject (Slice prevOffEnd off) : c' : r offEnd
     termSegments off =
-        let offEnd = fromIntegral $ Text.length subject
+        let offEnd = fromIntegral $ Text.lengthWord8 subject
         -- If the terminal segment is empty, omit it altogether.  That way,
         -- Text.concat can just return the subject without copying anything in
         -- cases where no substring is changed.
@@ -1211,6 +1211,7 @@ instance Show Pcre2CompileException where
         where
         tab = 20
         pattLinesMaybeWithCaret
+            -- FIXME Do not use Text.length since offsets are in code units
             | offset' == Text.length patt = pattLines
             | otherwise                   = insertCaretLine numberedPattLines
         offset' = fromIntegral offset
