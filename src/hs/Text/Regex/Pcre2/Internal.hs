@@ -174,11 +174,11 @@ unsafeLazyStreamToList = fix $ \continue -> \case
 -- been \"compiled\".  It takes a subject a produces a stream of match results
 -- corresponding to a global match.
 --
--- The actual values of type @Ptr Pcre2_match_data@ will be equal within each
--- global match; they represent the states of the C data at moments in time, and
--- are intended to be composed with another streaming transformation before
--- being subjected to teardown and `unsafePerformIO`.
-type Matcher = Text -> Stream (Ptr Pcre2_match_data) IO ()
+-- The actual yielded match data references will be equal within each global
+-- match; they represent the states of the C data at moments in time, and are
+-- intended to be composed with another streaming transformation before being
+-- subjected to teardown and `unsafePerformIO`.
+type Matcher = Text -> Stream MatchData IO ()
 
 -- | A substitution function.  It takes a subject and produces the number of
 -- substitutions performed (0 or 1, or more in the presence of `SubGlobal`)
@@ -440,6 +440,7 @@ data SubCalloutResult
 type CompileContext = ForeignPtr Pcre2_compile_context
 type Code           = ForeignPtr Pcre2_code
 type MatchContext   = ForeignPtr Pcre2_match_context
+type MatchData      = ForeignPtr Pcre2_match_data
 
 -- | An `Option` can result in multiple \"plans\".
 applyOption :: Option -> [AppliedOption]
@@ -678,22 +679,27 @@ userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
 -- | A `MatchEnv` is sufficient to fully implement a matching function.
 matcherWithEnv :: MatchEnv -> Matcher
 matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $
-    withForeignPtr matchEnvCode $ \codePtr ->
-    withMatchDataFromCode codePtr $ \matchDataPtr ->
-    Text.useAsPtr subject $ \subjPtr subjCUs -> do
+    withForeignPtr matchEnvCode $ \codePtr -> do
+        (subjForeignPtr, subjCUs) <- Text.asForeignPtr subject
+        matchData <- mkForeignPtr pcre2_match_data_free $
+            pcre2_match_data_create_from_pattern codePtr nullPtr
         MatchTempEnv{..} <- mkMatchTempEnv matchEnv subject
 
         -- Loop over the subject, emitting match data until stopping.
         return $ fix1 0 $ \continue curOff -> do
-            result <- liftIO $ withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
-                pcre2_match
-                    codePtr
-                    (toCUs subjPtr)
-                    (fromIntegral subjCUs)
-                    curOff
-                    matchEnvOpts
-                    matchDataPtr
-                    ctxPtr
+            result <- liftIO $
+                withForeignPtr matchEnvCode $ \codePtr ->
+                withForeignPtr subjForeignPtr $ \subjPtr ->
+                withForeignPtr matchData $ \matchDataPtr ->
+                withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
+                    pcre2_match
+                        codePtr
+                        (toCUs subjPtr)
+                        (fromIntegral subjCUs)
+                        curOff
+                        matchEnvOpts
+                        matchDataPtr
+                        ctxPtr
 
             -- Handle no match and errors
             unless (result == pcre2_ERROR_NOMATCH) $ do
@@ -701,23 +707,18 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $
                     liftIO $ maybeRethrow matchTempEnvRef
                 liftIO $ check (> 0) result
 
-                streamYield matchDataPtr
+                streamYield matchData
 
                 -- Determine next starting offset
                 nextOff <- liftIO $ do
-                    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+                    ovecPtr <- withForeignPtr matchData
+                        pcre2_get_ovector_pointer
                     curOffEnd <- peekElemOff ovecPtr 1
                     -- Prevent infinite loop upon empty match
                     return $ max curOffEnd (curOff + 1)
 
                 -- Handle end of subject
                 unless (nextOff > fromIntegral subjCUs) $ continue nextOff
-
-    where
-    withMatchDataFromCode codePtr action = do
-        matchData <- mkForeignPtr pcre2_match_data_free $
-            pcre2_match_data_create_from_pattern codePtr nullPtr
-        withForeignPtr matchData action
 
 -- | Helper to generate public matching functions.
 pureUserMatcher :: Option -> Text -> Matcher
@@ -1030,18 +1031,19 @@ _gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
 --
 -- * @[]@ when we want to easily pattern match specific capture groups via
 --   Template Haskell-generated @ViewPatterns@.
-type FromMatch t = Ptr Pcre2_match_data -> IO (t Slice)
+type FromMatch t = MatchData -> IO (t Slice)
 
 -- | Read all specifically indexed captures' offsets from match results.
 getWhitelistedSlices :: (Traversable t) => t Int -> FromMatch t
-getWhitelistedSlices whitelist matchDataPtr = do
-    ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
-    let peekOvec :: Int -> IO Text.I8
-        peekOvec = fmap fromIntegral . peekElemOff ovecPtr
+getWhitelistedSlices whitelist matchData =
+    withForeignPtr matchData $ \matchDataPtr -> do
+        ovecPtr <- pcre2_get_ovector_pointer matchDataPtr
+        let peekOvec :: Int -> IO Text.I8
+            peekOvec = fmap fromIntegral . peekElemOff ovecPtr
 
-    forM whitelist $ \i -> Slice
-        <$> peekOvec (i * 2)
-        <*> peekOvec (i * 2 + 1)
+        forM whitelist $ \i -> Slice
+            <$> peekOvec (i * 2)
+            <*> peekOvec (i * 2 + 1)
 
 -- | Read just the 0th capture's offsets from match results.
 get0thSlice :: FromMatch Identity
@@ -1049,11 +1051,11 @@ get0thSlice = getWhitelistedSlices $ Identity 0
 
 -- | Read all captures' offsets from match results.
 getAllSlices :: FromMatch NonEmpty
-getAllSlices matchDataPtr = do
-    count <- fromIntegral <$> pcre2_get_ovector_count matchDataPtr
+getAllSlices matchData = do
+    count <- fromIntegral <$> withForeignPtr matchData pcre2_get_ovector_count
     let whitelist = 0 :| [1 .. count - 1]
 
-    getWhitelistedSlices whitelist matchDataPtr
+    getWhitelistedSlices whitelist matchData
 
 -- | Placeholder for building a `Traversal'` to be passed to `has`.
 getNoSlices :: FromMatch Proxy
