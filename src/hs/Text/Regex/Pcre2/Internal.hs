@@ -482,14 +482,14 @@ applyOption = \case
     MatchWord          -> [CompileExtraOption pcre2_EXTRA_MATCH_WORD]
 
     -- CompileContextOption
-    Bsr bsr -> unary
-        CompileContextOption pcre2_set_bsr (bsrToC bsr)
-    MaxPatternLength len -> unary
-        CompileContextOption pcre2_set_max_pattern_length (fromIntegral len)
-    Newline newline -> unary
-        CompileContextOption pcre2_set_newline (newlineToC newline)
-    ParensLimit limit -> unary
-        CompileContextOption pcre2_set_parens_nest_limit (fromIntegral limit)
+    Bsr bsr -> ctxUpd CompileContextOption
+        pcre2_set_bsr (bsrToC bsr)
+    MaxPatternLength len -> ctxUpd CompileContextOption
+        pcre2_set_max_pattern_length (fromIntegral len)
+    Newline newline -> ctxUpd CompileContextOption
+        pcre2_set_newline (newlineToC newline)
+    ParensLimit limit -> ctxUpd CompileContextOption
+        pcre2_set_parens_nest_limit (fromIntegral limit)
 
     -- CompileRecGuardOption
     UnsafeCompileRecGuard f -> [CompileRecGuardOption f]
@@ -514,17 +514,18 @@ applyOption = \case
     UnsafeSubCallout f -> [SubCalloutOption f]
 
     -- MatchContextOption
-    DepthLimit limit -> unary
-        MatchContextOption pcre2_set_depth_limit (fromIntegral limit)
-    HeapLimit limit -> unary
-        MatchContextOption pcre2_set_heap_limit (fromIntegral limit)
-    MatchLimit limit -> unary
-        MatchContextOption pcre2_set_match_limit (fromIntegral limit)
-    OffsetLimit limit -> CompileOption pcre2_USE_OFFSET_LIMIT : unary
-        MatchContextOption pcre2_set_offset_limit (fromIntegral limit)
+    DepthLimit limit -> ctxUpd MatchContextOption
+        pcre2_set_depth_limit (fromIntegral limit)
+    HeapLimit limit -> ctxUpd MatchContextOption
+        pcre2_set_heap_limit (fromIntegral limit)
+    MatchLimit limit -> ctxUpd MatchContextOption
+        pcre2_set_match_limit (fromIntegral limit)
+    OffsetLimit limit ->
+        CompileOption pcre2_USE_OFFSET_LIMIT :
+        ctxUpd MatchContextOption pcre2_set_offset_limit (fromIntegral limit)
 
     where
-    unary ctor f x = [ctor $ \ctx -> withForeignPtr ctx applyAndCheck] where
+    ctxUpd ctor f x = [ctor $ \ctx -> withForeignPtr ctx applyAndCheck] where
         applyAndCheck ctxPtr = f ctxPtr x >>= check (== 0)
 
 -- | Intermediate representation of options expressing what effect they'll have
@@ -678,47 +679,47 @@ userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
 
 -- | A `MatchEnv` is sufficient to fully implement a matching function.
 matcherWithEnv :: MatchEnv -> Matcher
-matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $
-    withForeignPtr matchEnvCode $ \codePtr -> do
-        (subjForeignPtr, subjCUs) <- Text.asForeignPtr subject
-        matchData <- mkForeignPtr pcre2_match_data_free $
+matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
+    (subjForeignPtr, subjCUs) <- Text.asForeignPtr subject
+    matchData <- mkForeignPtr pcre2_match_data_free $
+        withForeignPtr matchEnvCode $ \codePtr ->
             pcre2_match_data_create_from_pattern codePtr nullPtr
-        MatchTempEnv{..} <- mkMatchTempEnv matchEnv subject
+    MatchTempEnv{..} <- mkMatchTempEnv matchEnv subject
 
-        -- Loop over the subject, emitting match data until stopping.
-        return $ fix1 0 $ \continue curOff -> do
-            result <- liftIO $
-                withForeignPtr matchEnvCode $ \codePtr ->
-                withForeignPtr subjForeignPtr $ \subjPtr ->
-                withForeignPtr matchData $ \matchDataPtr ->
-                withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
-                    pcre2_match
-                        codePtr
-                        (toCUs subjPtr)
-                        (fromIntegral subjCUs)
-                        curOff
-                        matchEnvOpts
-                        matchDataPtr
-                        ctxPtr
+    -- Loop over the subject, emitting match data until stopping.
+    return $ fix1 0 $ \continue curOff -> do
+        result <- liftIO $
+            withForeignPtr matchEnvCode $ \codePtr ->
+            withForeignPtr subjForeignPtr $ \subjPtr ->
+            withForeignPtr matchData $ \matchDataPtr ->
+            withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
+                pcre2_match
+                    codePtr
+                    (toCUs subjPtr)
+                    (fromIntegral subjCUs)
+                    curOff
+                    matchEnvOpts
+                    matchDataPtr
+                    ctxPtr
 
-            -- Handle no match and errors
-            unless (result == pcre2_ERROR_NOMATCH) $ do
-                when (result == pcre2_ERROR_CALLOUT) $
-                    liftIO $ maybeRethrow matchTempEnvRef
-                liftIO $ check (> 0) result
+        -- Handle no match and errors
+        unless (result == pcre2_ERROR_NOMATCH) $ do
+            when (result == pcre2_ERROR_CALLOUT) $
+                liftIO $ maybeRethrow matchTempEnvRef
+            liftIO $ check (> 0) result
 
-                streamYield matchData
+            streamYield matchData
 
-                -- Determine next starting offset
-                nextOff <- liftIO $ do
-                    ovecPtr <- withForeignPtr matchData
-                        pcre2_get_ovector_pointer
-                    curOffEnd <- peekElemOff ovecPtr 1
-                    -- Prevent infinite loop upon empty match
-                    return $ max curOffEnd (curOff + 1)
+            -- Determine next starting offset
+            nextOff <- liftIO $ do
+                ovecPtr <- withForeignPtr matchData
+                    pcre2_get_ovector_pointer
+                curOffEnd <- peekElemOff ovecPtr 1
+                -- Prevent infinite loop upon empty match
+                return $ max curOffEnd (curOff + 1)
 
-                -- Handle end of subject
-                unless (nextOff > fromIntegral subjCUs) $ continue nextOff
+            -- Handle end of subject
+            unless (nextOff > fromIntegral subjCUs) $ continue nextOff
 
 -- | Helper to generate public matching functions.
 pureUserMatcher :: Option -> Text -> Matcher
