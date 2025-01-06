@@ -1,5 +1,13 @@
 # Changelog and Acknowledgements
 
+## 2.2.2
+* Fixed [#34](https://github.com/sjshuck/hs-pcre2/issues/34),
+  [#35](https://github.com/sjshuck/hs-pcre2/issues/35), and
+  [#39](https://github.com/sjshuck/hs-pcre2/issues/39), all related to a
+  use-before-`free()` bug.
+* Updated PCRE2 to 10.44 (no API changes).
+* Minor simplifications in docs and implementation.
+
 ## 2.2.1
 * Fixed [#26](https://github.com/sjshuck/hs-pcre2/issues/26) where wide UTF-8
   characters were not handled correctly.
