@@ -1,3 +1,4 @@
+{-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE LambdaCase #-}
@@ -38,14 +39,26 @@ import           Text.Regex.Pcre2.Foreign
 
 type FfiWrapper f = f -> IO (FunPtr f)
 
+foreign import capi unsafe "pcre2.h &pcre2_code_free"
+    pcre2_code_finalizer :: FinalizerPtr Pcre2_code
+
+foreign import capi unsafe "pcre2.h &pcre2_compile_context_free"
+    pcre2_compile_context_finalizer :: FinalizerPtr Pcre2_compile_context
+
+foreign import capi unsafe "pcre2.h &pcre2_match_context_free"
+    pcre2_match_context_finalizer :: FinalizerPtr Pcre2_match_context
+
+foreign import capi unsafe "pcre2.h &pcre2_match_data_free"
+    pcre2_match_data_finalizer :: FinalizerPtr Pcre2_match_data
+
 -- | There is no @nullForeignPtr@ to pass to `withForeignPtr`, so we have to
 -- fake it with a `Maybe`.
 withForeignOrNullPtr :: Maybe (ForeignPtr a) -> (Ptr a -> IO b) -> IO b
 withForeignOrNullPtr = maybe ($ nullPtr) withForeignPtr
 
 -- | Helper so we never leak untracked 'Ptr's.
-mkForeignPtr :: (Ptr a -> IO ()) -> IO (Ptr a) -> IO (ForeignPtr a)
-mkForeignPtr finalize create = create >>= Conc.newForeignPtr <*> finalize
+mkForeignPtr :: FinalizerPtr a -> IO (Ptr a) -> IO (ForeignPtr a)
+mkForeignPtr finalizer create = create >>= newForeignPtr finalizer
 
 -- | Helper so we never leak untracked 'FunPtr's.
 mkFunPtr :: ForeignPtr b -> IO (FunPtr a) -> IO (FunPtr a)
@@ -584,7 +597,7 @@ extractCompileEnv = do
             compileEnvERef = Nothing}
 
         else liftIO $ do
-            ctx <- mkForeignPtr pcre2_compile_context_free $
+            ctx <- mkForeignPtr pcre2_compile_context_finalizer $
                 pcre2_compile_context_create nullPtr
 
             forM_ ctxUpds $ \update -> update ctx
@@ -618,7 +631,7 @@ extractCode :: Text -> CompileEnv -> ExtractOpts Code
 extractCode patt CompileEnv{..} = do
     opts <- bitOr <$> extractOptsOf _CompileOption
 
-    liftIO $ mkForeignPtr pcre2_code_free $
+    liftIO $ mkForeignPtr pcre2_code_finalizer $
         Text.useAsPtr patt $ \pattPtr pattCUs ->
         alloca $ \errorCodePtr ->
         alloca $ \errorOffPtr ->
@@ -658,7 +671,7 @@ extractMatchEnv matchEnvCode = do
     matchEnvCtx <- extractOptsOf _MatchContextOption >>= \case
         []      -> return Nothing
         ctxUpds -> liftIO $ Just <$> do
-            ctx <- mkForeignPtr pcre2_match_context_free $
+            ctx <- mkForeignPtr pcre2_match_context_finalizer $
                 pcre2_match_context_create nullPtr
             forM_ ctxUpds $ \update -> update ctx
             return ctx
@@ -681,7 +694,7 @@ userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
 matcherWithEnv :: MatchEnv -> Matcher
 matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
     (subjForeignPtr, subjCUs) <- Text.asForeignPtr subject
-    matchData <- mkForeignPtr pcre2_match_data_free $
+    matchData <- mkForeignPtr pcre2_match_data_finalizer $
         withForeignPtr matchEnvCode $ \codePtr ->
             pcre2_match_data_create_from_pattern codePtr nullPtr
     MatchTempEnv{..} <- mkMatchTempEnv matchEnv subject
@@ -831,7 +844,7 @@ mkMatchTempEnv MatchEnv{..} subject
             calloutStateException = Nothing,
             calloutStateSubsLog   = IM.empty}
 
-        ctx <- mkForeignPtr pcre2_match_context_free $ case matchEnvCtx of
+        ctx <- mkForeignPtr pcre2_match_context_finalizer $ case matchEnvCtx of
             -- No pre-existing match context, so create one afresh.
             Nothing -> pcre2_match_context_create nullPtr
             -- Pre-existing match context, so copy it.
