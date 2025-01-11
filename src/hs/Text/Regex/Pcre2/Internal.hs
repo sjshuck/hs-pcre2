@@ -17,8 +17,6 @@ import           Data.Foldable              (foldl', toList)
 import           Data.Function              (fix)
 import           Data.Functor.Identity      (Identity(..))
 import           Data.IORef
-import           Data.IntMap.Strict         (IntMap)
-import qualified Data.IntMap.Strict         as IM
 import           Data.List.NonEmpty         (NonEmpty(..))
 import           Data.Maybe                 (fromMaybe)
 import           Data.Monoid                (Alt(..), First)
@@ -36,36 +34,6 @@ import           System.IO.Unsafe           (unsafePerformIO)
 import           Text.Regex.Pcre2.Foreign
 
 -- * General utilities
-
-type FfiWrapper f = f -> IO (FunPtr f)
-
-foreign import capi unsafe "pcre2.h &pcre2_code_free"
-    pcre2_code_finalizer :: FinalizerPtr Pcre2_code
-
-foreign import capi unsafe "pcre2.h &pcre2_compile_context_free"
-    pcre2_compile_context_finalizer :: FinalizerPtr Pcre2_compile_context
-
-foreign import capi unsafe "pcre2.h &pcre2_match_context_free"
-    pcre2_match_context_finalizer :: FinalizerPtr Pcre2_match_context
-
-foreign import capi unsafe "pcre2.h &pcre2_match_data_free"
-    pcre2_match_data_finalizer :: FinalizerPtr Pcre2_match_data
-
--- | There is no @nullForeignPtr@ to pass to `withForeignPtr`, so we have to
--- fake it with a `Maybe`.
-withForeignOrNullPtr :: Maybe (ForeignPtr a) -> (Ptr a -> IO b) -> IO b
-withForeignOrNullPtr = maybe ($ nullPtr) withForeignPtr
-
--- | Helper so we never leak untracked 'Ptr's.
-mkForeignPtr :: FinalizerPtr a -> IO (Ptr a) -> IO (ForeignPtr a)
-mkForeignPtr finalizer create = create >>= newForeignPtr finalizer
-
--- | Helper so we never leak untracked 'FunPtr's.
-mkFunPtr :: ForeignPtr b -> IO (FunPtr a) -> IO (FunPtr a)
-mkFunPtr anchor create = do
-    funPtr <- create
-    Conc.addForeignPtrFinalizer anchor $ freeHaskellFunPtr funPtr
-    return funPtr
 
 bitOr :: (Foldable t, Bits a) => t a -> a
 bitOr = foldl' (.|.) zeroBits
@@ -88,6 +56,40 @@ unchompedLines s = case break (== '\n') s of
 -- > fix1 x0 $ \go x -> ...
 fix1 :: a -> ((a -> b) -> a -> b) -> b
 fix1 x f = fix f x
+
+newERef :: IO (IORef (Maybe SomeException))
+newERef = newIORef Nothing
+
+-- ** FFI utilities
+
+type FfiWrapper f = f -> IO (FunPtr f)
+
+-- | There is no @nullForeignPtr@ to pass to `withForeignPtr`, so we have to
+-- fake it with a `Maybe`.
+withForeignOrNullPtr :: Maybe (ForeignPtr a) -> (Ptr a -> IO b) -> IO b
+withForeignOrNullPtr = maybe ($ nullPtr) withForeignPtr
+
+-- | Helper so we never leak untracked 'Ptr's.
+mkForeignPtr :: FinalizerPtr a -> IO (Ptr a) -> IO (ForeignPtr a)
+mkForeignPtr finalizer create = create >>= newForeignPtr finalizer
+
+-- | Helper so we never leak untracked 'FunPtr's.
+mkFunPtr :: ForeignPtr b -> IO (FunPtr a) -> IO (FunPtr a)
+mkFunPtr anchor create = do
+    funPtr <- create
+    Conc.addForeignPtrFinalizer anchor $ freeHaskellFunPtr funPtr
+    return funPtr
+
+-- These are unsafe imports and should not be exported if
+-- pcre2_general_context_create is also part of the API.
+foreign import capi unsafe "pcre2.h &pcre2_code_free_8"
+    pcre2_code_finalizer :: FinalizerPtr Pcre2_code
+foreign import capi unsafe "pcre2.h &pcre2_compile_context_free_8"
+    pcre2_compile_context_finalizer :: FinalizerPtr Pcre2_compile_context
+foreign import capi unsafe "pcre2.h &pcre2_match_context_free_8"
+    pcre2_match_context_finalizer :: FinalizerPtr Pcre2_match_context
+foreign import capi unsafe "pcre2.h &pcre2_match_data_free_8"
+    pcre2_match_data_finalizer :: FinalizerPtr Pcre2_match_data
 
 -- ** Fast @Text@ slicing
 
@@ -425,6 +427,12 @@ data CalloutResult
     | CalloutNoMatch -- ^ Fail the whole match.
     deriving (Show, Eq)
 
+-- | Haskell to C.
+calloutResultToC :: CalloutResult -> CInt
+calloutResultToC CalloutProceed     = 0
+calloutResultToC CalloutNoMatchHere = 1
+calloutResultToC CalloutNoMatch     = pcre2_ERROR_NOMATCH
+
 -- | Input for user-defined substitution callouts.
 data SubCalloutInfo
     = SubCalloutInfo{
@@ -447,6 +455,14 @@ data SubCalloutResult
     -- global mode.
     | SubCalloutAbort -- ^ Do not perform this or any subsequent substitutions.
     deriving (Show, Eq)
+
+-- | Haskell to C.
+subCalloutResultToC :: SubCalloutResult -> CInt
+subCalloutResultToC SubCalloutAccept =  0
+subCalloutResultToC SubCalloutSkip   =  1
+subCalloutResultToC SubCalloutAbort  = -1
+
+class CalloutPtr ptr where
 
 -- ** Lower-level representation of options and C data
 
@@ -606,7 +622,7 @@ extractCompileEnv = do
                 pcre2_set_compile_extra_options ctxPtr xtraOpts >>= check (== 0)
 
             compileEnvERef <- forM recGuard $ \f -> do
-                eRef <- newIORef Nothing
+                eRef <- newERef
                 funPtr <- mkFunPtr ctx $ mkRecursionGuard $ \depth _ -> do
                     resultOrE <- try $ f (fromIntegral depth) >>= evaluate
                     case resultOrE of
@@ -657,11 +673,11 @@ extractCode patt CompileEnv{..} = do
 -- substitution.  This remains constant for the lifetime of a `Matcher` or
 -- `Subber`.
 data MatchEnv = MatchEnv{
-    matchEnvCode       :: Code,
-    matchEnvOpts       :: CUInt,
-    matchEnvCtx        :: Maybe MatchContext,
-    matchEnvCallout    :: Maybe (CalloutInfo -> IO CalloutResult),
-    matchEnvSubCallout :: Maybe (SubCalloutInfo -> IO SubCalloutResult)}
+    matchEnvCode       :: !Code,
+    matchEnvOpts       :: !CUInt,
+    matchEnvCtx        :: !(Maybe MatchContext),
+    matchEnvCallout    :: !(Maybe (CalloutInfo -> IO CalloutResult)),
+    matchEnvSubCallout :: !(Maybe (SubCalloutInfo -> IO SubCalloutResult))}
 
 -- | Prepare a matching function after compiling the underlying @pcre2_code@.
 extractMatchEnv :: Code -> ExtractOpts MatchEnv
@@ -697,7 +713,6 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
     matchData <- mkForeignPtr pcre2_match_data_finalizer $
         withForeignPtr matchEnvCode $ \codePtr ->
             pcre2_match_data_create_from_pattern codePtr nullPtr
-    MatchTempEnv{..} <- mkMatchTempEnv matchEnv subject
 
     -- Loop over the subject, emitting match data until stopping.
     return $ fix1 0 $ \continue curOff -> do
@@ -705,7 +720,7 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
             withForeignPtr matchEnvCode $ \codePtr ->
             withForeignPtr subjForeignPtr $ \subjPtr ->
             withForeignPtr matchData $ \matchDataPtr ->
-            withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
+            withMatchCtxPtrFromEnv matchEnv subject $ \ctxPtr ->
                 pcre2_match
                     codePtr
                     (toCUs subjPtr)
@@ -717,8 +732,6 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
 
         -- Handle no match and errors
         unless (result == pcre2_ERROR_NOMATCH) $ do
-            when (result == pcre2_ERROR_CALLOUT) $
-                liftIO $ maybeRethrow matchTempEnvRef
             liftIO $ check (> 0) result
 
             streamYield matchData
@@ -756,7 +769,7 @@ pureUserMatcher option patt =
 -- along with their results, and replay the log the second time, returning those
 -- same results without re-incurring effects.
 subberWithEnv :: MatchEnv -> Text -> Subber
-subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
+subberWithEnv matchEnv0@MatchEnv{..} replacement subject =
     withForeignPtr matchEnvCode $ \codePtr ->
     Text.useAsPtr subject $ \subjPtr subjCUs ->
     Text.useAsPtr replacement $ \replPtr replCUs ->
@@ -783,37 +796,45 @@ subberWithEnv firstMatchEnv@MatchEnv{..} replacement subject =
                 out <- Text.fromPtr (fromCUs outBufPtr) (fromIntegral outLen)
                 return (result, out)
 
-        MatchTempEnv{..} <- mkMatchTempEnv firstMatchEnv subject
-        firstAttempt <- withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
-            allocaArray initOutLen $ \outBufPtr -> do
-                result <- run pcre2_SUBSTITUTE_OVERFLOW_LENGTH ctxPtr outBufPtr
-                maybeRethrow matchTempEnvRef
-                if result == pcre2_ERROR_NOMEMORY
-                    then Left <$> case matchTempEnvRef of
-                        Nothing  -> return IM.empty
-                        Just ref -> calloutStateSubsLog <$> readIORef ref
-                    else Right <$> checkAndGetOutput result outBufPtr
+        (matchEnv1, maybeSubCalloutAndLogRef) <- case matchEnvSubCallout of
+            Nothing -> return (matchEnv0, Nothing)
+            Just f  -> do
+                logRef <- newIORef []
+                let matchEnv0 = matchEnv0{
+                        matchEnvSubCallout = Just $ \info -> do
+                            result <- f info
+                            modifyIORef' logRef (result :)
+                            return result}
+                return (matchEnv0, Just (f, logRef))
 
-        case firstAttempt of
-            Right resultAndOutput -> return resultAndOutput
-            Left subsLog          -> do
+        maybeResult1 <-
+            withMatchCtxPtrFromEnv matchEnv1 subject $ \ctxPtr ->
+            allocaArray initOutLen $ \outBufPtr -> do
+                result1 <- run pcre2_SUBSTITUTE_OVERFLOW_LENGTH ctxPtr outBufPtr
+                if result1 == pcre2_ERROR_NOMEMORY
+                    then return Nothing
+                    else Just <$> checkAndGetOutput result1 outBufPtr
+
+        case maybeResult1 of
+            Just result1 -> return result1
+            Nothing      -> do
                 -- The output was bigger than we guessed.  Try again.
                 computedOutLen <- fromIntegral <$> peek outLenPtr
-                let finalMatchEnv = firstMatchEnv{
+                -- Prepare the log to be replayed in FIFO order
+                forM_ maybeSubCalloutAndLogRef $ \(_, logRef) ->
+                    modifyIORef logRef reverse
+                let matchEnv2 = matchEnv0{
                         -- Do not run regular callouts again.
                         matchEnvCallout = Nothing,
                         -- Do not run any substitution callouts run previously.
-                        matchEnvSubCallout = fastFwd <$> matchEnvSubCallout}
-                    fastFwd f = \info ->
-                        case subsLog IM.!? subCalloutSubsCount info of
-                            Just result -> return result
-                            Nothing     -> f info
-                MatchTempEnv{..} <- mkMatchTempEnv finalMatchEnv subject
-                withForeignOrNullPtr matchTempEnvCtx $ \ctxPtr ->
+                        matchEnvSubCallout = maybeSubCalloutAndLogRef
+                            <&> \(f, logRef) info -> readIORef logRef >>= \case
+                                r : rs -> writeIORef logRef rs >> return r
+                                []     -> f info}
+                withMatchCtxPtrFromEnv matchEnv2 subject $ \ctxPtr ->
                     allocaArray computedOutLen $ \outBufPtr -> do
-                        result <- run 0 ctxPtr outBufPtr
-                        maybeRethrow matchTempEnvRef
-                        checkAndGetOutput result outBufPtr
+                        result2 <- run 0 ctxPtr outBufPtr
+                        checkAndGetOutput result2 outBufPtr
 
     where
     -- Guess the size of the output to be <= 2x that of the subject.
@@ -830,86 +851,66 @@ pureUserSubber option patt =
 -- We need to save and inspect state that occurs in potentially concurrent
 -- matches.  This means a new state ref for each match, which means a new
 -- `FunPtr` to close on it, which means a new match context to set it to.
-mkMatchTempEnv
+--
+-- Install C function pointers in the @pcre2_match_context@.  When dereferenced
+-- and called, they will force the user-supplied Haskell callout functions and
+-- their results, catching any exceptions and saving them.
+
+-- Install callout, if any
+withMatchCtxPtrFromEnv
     :: MatchEnv
     -> Text -- ^ Callout info requires access to the original subject.
-    -> IO MatchTempEnv
-mkMatchTempEnv MatchEnv{..} subject
-    | null matchEnvCallout && null matchEnvSubCallout = return MatchTempEnv{
-        matchTempEnvCtx = matchEnvCtx,
-        matchTempEnvRef = Nothing}
+    -> (Ptr Pcre2_match_context -> IO a)
+    -> IO a
+withMatchCtxPtrFromEnv MatchEnv{..} subject action
+    | null matchEnvCallout && null matchEnvSubCallout =
+        withForeignOrNullPtr matchEnvCtx action
+    | otherwise =
+        bracket acquireCtxPtr pcre2_match_context_free $ \ctxPtr ->
+        maybe id (withSetCallout ctxPtr) matchEnvCallout $
+        maybe id (withSetSubCallout ctxPtr) matchEnvSubCallout $
+            action ctxPtr
 
-    | otherwise = do
-        stateRef <- newIORef CalloutState{
-            calloutStateException = Nothing,
-            calloutStateSubsLog   = IM.empty}
+    where
+    acquireCtxPtr = case matchEnvCtx of
+        -- No pre-existing match context, so create one afresh.
+        Nothing -> pcre2_match_context_create nullPtr
+        -- Pre-existing match context, so copy it.
+        Just ctx -> withForeignPtr ctx pcre2_match_context_copy
 
-        ctx <- mkForeignPtr pcre2_match_context_finalizer $ case matchEnvCtx of
-            -- No pre-existing match context, so create one afresh.
-            Nothing -> pcre2_match_context_create nullPtr
-            -- Pre-existing match context, so copy it.
-            Just ctx -> withForeignPtr ctx pcre2_match_context_copy
-
-        -- Install C function pointers in the @pcre2_match_context@.  When
-        -- dereferenced and called, they will force the user-supplied Haskell
-        -- callout functions and their results, catching any exceptions and
-        -- saving them.
-
-        -- Install callout, if any
-        forM_ matchEnvCallout $ \f -> do
-            funPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
+    withSetCallout ctxPtr f action = do
+        eRef <- newERef
+        let acquireFunPtr = mkCallout $ \blockPtr _ -> do
                 info <- getCalloutInfo subject blockPtr
-                resultOrE <- try $ f info >>= evaluate
-                case resultOrE of
-                    Right result -> return $ case result of
-                        CalloutProceed     -> 0
-                        CalloutNoMatchHere -> 1
-                        CalloutNoMatch     -> pcre2_ERROR_NOMATCH
-                    Left e -> do
-                        modifyIORef' stateRef $ _calloutStateException ?~ e
+                try (f info >>= evaluate) >>= \case
+                    Right result -> return $ calloutResultToC result
+                    Left e       -> do
+                        writeIORef eRef $ Just e
                         return pcre2_ERROR_CALLOUT
-            withForeignPtr ctx $ \ctxPtr ->
-                pcre2_set_callout ctxPtr funPtr nullPtr >>= check (== 0)
+        ret <- bracket acquireFunPtr freeHaskellFunPtr $ \funPtr -> do
+            pcre2_set_callout ctxPtr funPtr nullPtr >>= check (== 0)
+            action
+        readIORef eRef >>= mapM_ throwIO
+        return ret
 
-        -- Install substitution callout, if any
-        forM_ matchEnvSubCallout $ \f -> do
-            funPtr <- mkFunPtr ctx $ mkCallout $ \blockPtr _ -> do
+    withSetSubCallout ctxPtr f action = do
+        eRef <- newERef
+        let acquireFunPtr = mkCallout $ \blockPtr _ -> do
                 info <- getSubCalloutInfo subject blockPtr
-                resultOrE <- try $ f info >>= evaluate
-                case resultOrE of
-                    Right result -> do
-                        modifyIORef' stateRef $ over _calloutStateSubsLog $
-                            IM.insert (subCalloutSubsCount info) result
-                        return $ case result of
-                            SubCalloutAccept ->  0
-                            SubCalloutSkip   ->  1
-                            SubCalloutAbort  -> -1
-                    Left e -> do
-                        modifyIORef' stateRef $ _calloutStateException ?~ e
+                try (f info >>= evaluate) >>= \case
+                    Right result -> return $ subCalloutResultToC result
+                    Left e       -> do
+                        writeIORef eRef $ Just e
                         return (-1)
-            withForeignPtr ctx $ \ctxPtr ->
-                pcre2_set_substitute_callout ctxPtr funPtr nullPtr >>=
-                    check (== 0)
-
-        return MatchTempEnv{
-            matchTempEnvCtx = Just ctx,
-            matchTempEnvRef = Just stateRef}
-
--- | Per-call data for @pcre2_match()@ etc.
-data MatchTempEnv = MatchTempEnv{
-    matchTempEnvCtx :: !(Maybe MatchContext),
-    matchTempEnvRef :: !(Maybe (IORef CalloutState))}
+        ret <- bracket acquireFunPtr freeHaskellFunPtr $ \funPtr -> do
+            pcre2_set_substitute_callout ctxPtr funPtr nullPtr >>= check (== 0)
+            action
+        readIORef eRef >>= mapM_ throwIO
+        return ret
 
 -- | Data computed during callouts that will be stashed in an IORef and
--- inspected after @pcre2_match()@ or similar completes.  `Lens'`s included.
-data CalloutState = CalloutState{
-    calloutStateException :: !(Maybe SomeException),
-    calloutStateSubsLog   :: !(IntMap SubCalloutResult)}
-
-_calloutStateException f CalloutState{..} =
-    f calloutStateException <&> \calloutStateException -> CalloutState{..}
-_calloutStateSubsLog f CalloutState{..} =
-    f calloutStateSubsLog <&> \calloutStateSubsLog -> CalloutState{..}
+-- inspected after @pcre2_match()@ or similar completes.  Fake `Prism'`s
+-- included.
 
 foreign import ccall "wrapper" mkRecursionGuard :: FfiWrapper
     (CUInt -> Ptr a -> IO CInt)
@@ -986,10 +987,6 @@ getSubCalloutInfo subCalloutSubject blockPtr = do
             (fromIntegral $ end - start)
 
     return SubCalloutInfo{..}
-
--- | If there was a callout and it threw an exception, rethrow it.
-maybeRethrow :: Maybe (IORef CalloutState) -> IO ()
-maybeRethrow = mapM_ $ readIORef >=> mapM_ throwIO . calloutStateException
 
 -- * Packaging @Matcher@s and @Subber@s as public API functions
 
