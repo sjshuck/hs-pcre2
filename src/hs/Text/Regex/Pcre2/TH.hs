@@ -120,9 +120,7 @@ memoMatcher patt = unsafePerformIO $ do
 -- with a list of their names (each indexed and in index order).
 predictCapturesInfo :: Option -> Text -> IO (Int, [(Text, Int)])
 predictCapturesInfo option patt = do
-    code <- evalStateT
-        (extractCompileEnv >>= extractCode patt)
-        (applyOption option)
+    code <- evalStateT (extractCode patt) (applyOption option)
 
     withForeignPtr code $ \codePtr -> do
         count <- getCodeInfo @CUInt codePtr pcre2_INFO_NAMECOUNT

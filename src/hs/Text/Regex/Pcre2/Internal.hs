@@ -27,7 +27,6 @@ import qualified Data.Text.Foreign          as Text
 import           Data.Typeable              (cast)
 import           Foreign
 import           Foreign.C.Types            (CInt(..), CUChar, CUInt(..))
-import qualified Foreign.Concurrent         as Conc
 import           Lens.Micro
 import           Lens.Micro.Extras          (preview, view)
 import           System.IO.Unsafe           (unsafePerformIO)
@@ -68,17 +67,6 @@ type FfiWrapper f = f -> IO (FunPtr f)
 -- fake it with a `Maybe`.
 withForeignOrNullPtr :: Maybe (ForeignPtr a) -> (Ptr a -> IO b) -> IO b
 withForeignOrNullPtr = maybe ($ nullPtr) withForeignPtr
-
--- | Helper so we never leak untracked 'Ptr's.
-mkForeignPtr :: FinalizerPtr a -> IO (Ptr a) -> IO (ForeignPtr a)
-mkForeignPtr finalizer create = create >>= newForeignPtr finalizer
-
--- | Helper so we never leak untracked 'FunPtr's.
-mkFunPtr :: ForeignPtr b -> IO (FunPtr a) -> IO (FunPtr a)
-mkFunPtr anchor create = do
-    funPtr <- create
-    Conc.addForeignPtrFinalizer anchor $ freeHaskellFunPtr funPtr
-    return funPtr
 
 -- These are unsafe imports and should not be exported if
 -- pcre2_general_context_create is also part of the API.
@@ -554,20 +542,19 @@ applyOption = \case
         ctxUpd MatchContextOption pcre2_set_offset_limit (fromIntegral limit)
 
     where
-    ctxUpd ctor f x = [ctor $ \ctx -> withForeignPtr ctx applyAndCheck] where
-        applyAndCheck ctxPtr = f ctxPtr x >>= check (== 0)
+    ctxUpd ctor f x = [ctor $ \ctxPtr -> f ctxPtr x >>= check (== 0)]
 
 -- | Intermediate representation of options expressing what effect they'll have
 -- on which stage of regex compilation\/execution.  Also provide fake @Prism'@s.
 data AppliedOption
     = CompileOption !CUInt
     | CompileExtraOption !CUInt
-    | CompileContextOption !(CompileContext -> IO ())
+    | CompileContextOption !(Ptr Pcre2_compile_context -> IO ())
     | CompileRecGuardOption !(Int -> IO Bool)
     | MatchOption !CUInt
+    | MatchContextOption !(Ptr Pcre2_match_context -> IO ())
     | CalloutOption !(CalloutInfo -> IO CalloutResult)
     | SubCalloutOption !(SubCalloutInfo -> IO SubCalloutResult)
-    | MatchContextOption !(MatchContext -> IO ())
 
 _CompileOption f =
     \case CompileOption x -> CompileOption <$> f x; o -> pure o
@@ -601,73 +588,58 @@ extractOptsOf prism = state $ partitionEithers . map discrim where
     discrim opt = maybe (Right opt) Left $ opt ^? prism
 
 -- | Prepare to compile a `Code`.
-extractCompileEnv :: ExtractOpts CompileEnv
-extractCompileEnv = do
+extractCode :: Text -> ExtractOpts Code
+extractCode patt = do
     ctxUpds <- extractOptsOf _CompileContextOption
     xtraOpts <- bitOr <$> extractOptsOf _CompileExtraOption
     recGuard <- preview _last <$> extractOptsOf _CompileRecGuardOption
 
-    if null ctxUpds && xtraOpts == 0 && null recGuard
-        then return CompileEnv{
-            compileEnvCtx  = Nothing,
-            compileEnvERef = Nothing}
-
-        else liftIO $ do
-            ctx <- mkForeignPtr pcre2_compile_context_finalizer $
-                pcre2_compile_context_create nullPtr
-
-            forM_ ctxUpds $ \update -> update ctx
-
-            when (xtraOpts /= 0) $ withForeignPtr ctx $ \ctxPtr ->
-                pcre2_set_compile_extra_options ctxPtr xtraOpts >>= check (== 0)
-
-            compileEnvERef <- forM recGuard $ \f -> do
-                eRef <- newERef
-                funPtr <- mkFunPtr ctx $ mkRecursionGuard $ \depth _ -> do
-                    resultOrE <- try $ f (fromIntegral depth) >>= evaluate
-                    case resultOrE of
+    let withCompileCtxPtr action
+            | null ctxUpds && xtraOpts == 0 && null recGuard =
+                action nullPtr
+            | otherwise = withNonNullCompileCtxPtr $ \ctxPtr -> do
+                forM_ ctxUpds $ \update -> update ctxPtr
+                when (xtraOpts /= 0) $
+                    pcre2_set_compile_extra_options ctxPtr xtraOpts >>=
+                        check (== 0)
+                maybe id (withSetRecGuard ctxPtr) recGuard $ action ctxPtr
+        withNonNullCompileCtxPtr = bracket
+            (pcre2_compile_context_create nullPtr)
+            pcre2_compile_context_free
+        withSetRecGuard ctxPtr f action = do
+            eRef <- newERef
+            let acquireFunPtr = mkRecursionGuard $ \depth _ ->
+                    try (f (fromIntegral depth) >>= evaluate) >>= \case
                         Right success -> return $ if success then 0 else 1
                         Left e        -> writeIORef eRef (Just e) >> return 1
-                withForeignPtr ctx $ \ctxPtr ->
-                    pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>=
-                        check (== 0)
-                return eRef
+            ret <- bracket acquireFunPtr freeHaskellFunPtr $ \funPtr -> do
+                pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>=
+                    check (== 0)
+                action
+            readIORef eRef >>= mapM_ throwIO
+            return ret
 
-            return CompileEnv{compileEnvCtx = Just ctx, ..}
-
--- | Inputs to `Code` compilation besides the pattern.
-data CompileEnv = CompileEnv{
-    compileEnvCtx :: !(Maybe CompileContext),
-    -- | A register for catching exceptions thrown in recursion guards, if
-    -- needed.
-    compileEnvERef :: !(Maybe (IORef (Maybe SomeException)))}
-
--- | Compile a `Code`.
-extractCode :: Text -> CompileEnv -> ExtractOpts Code
-extractCode patt CompileEnv{..} = do
     opts <- bitOr <$> extractOptsOf _CompileOption
 
-    liftIO $ mkForeignPtr pcre2_code_finalizer $
-        Text.useAsPtr patt $ \pattPtr pattCUs ->
+    liftIO $
         alloca $ \errorCodePtr ->
-        alloca $ \errorOffPtr ->
-        withForeignOrNullPtr compileEnvCtx $ \ctxPtr -> do
-            codePtr <- pcre2_compile
-                (toCUs pattPtr)
-                (fromIntegral pattCUs)
-                (opts .|. pcre2_UTF)
-                errorCodePtr
-                errorOffPtr
-                ctxPtr
+        alloca $ \errorOffPtr -> do
+            codePtr <-
+                Text.useAsPtr patt $ \pattPtr pattCUs ->
+                withCompileCtxPtr $ \ctxPtr ->
+                    pcre2_compile
+                        (toCUs pattPtr)
+                        (fromIntegral pattCUs)
+                        (opts .|. pcre2_UTF)
+                        errorCodePtr
+                        errorOffPtr
+                        ctxPtr
             when (codePtr == nullPtr) $ do
-                -- Re-throw exception (if any) from recursion guard (if any)
-                forM_ compileEnvERef $ readIORef >=> mapM_ throwIO
-                -- Otherwise throw PCRE2 error
                 errorCode <- peek errorCodePtr
                 offCUs <- peek errorOffPtr
                 throwIO $ Pcre2CompileException errorCode patt offCUs
 
-            return codePtr
+            newForeignPtr pcre2_code_finalizer codePtr
 
 -- | `Code` and auxiliary compiled data used in preparation for a match or
 -- substitution.  This remains constant for the lifetime of a `Matcher` or
@@ -687,9 +659,10 @@ extractMatchEnv matchEnvCode = do
     matchEnvCtx <- extractOptsOf _MatchContextOption >>= \case
         []      -> return Nothing
         ctxUpds -> liftIO $ Just <$> do
-            ctx <- mkForeignPtr pcre2_match_context_finalizer $
-                pcre2_match_context_create nullPtr
-            forM_ ctxUpds $ \update -> update ctx
+            ctx <- pcre2_match_context_create nullPtr >>=
+                newForeignPtr pcre2_match_context_finalizer
+            withForeignPtr ctx $ \ctxPtr ->
+                forM_ ctxUpds $ \update -> update ctxPtr
             return ctx
 
     matchEnvCallout <- preview _last <$> extractOptsOf _CalloutOption
@@ -704,15 +677,15 @@ userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
     (matchEnv, []) -> matchEnv
     _              -> error "BUG! Options not fully extracted"
     where
-    extractAll = extractCompileEnv >>= extractCode patt >>= extractMatchEnv
+    extractAll = extractCode patt >>= extractMatchEnv
 
 -- | A `MatchEnv` is sufficient to fully implement a matching function.
 matcherWithEnv :: MatchEnv -> Matcher
 matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
     (subjForeignPtr, subjCUs) <- Text.asForeignPtr subject
-    matchData <- mkForeignPtr pcre2_match_data_finalizer $
-        withForeignPtr matchEnvCode $ \codePtr ->
-            pcre2_match_data_create_from_pattern codePtr nullPtr
+    matchData <- withForeignPtr matchEnvCode $ \codePtr ->
+        pcre2_match_data_create_from_pattern codePtr nullPtr >>=
+            newForeignPtr pcre2_match_data_finalizer
 
     -- Loop over the subject, emitting match data until stopping.
     return $ fix1 0 $ \continue curOff -> do
@@ -800,12 +773,12 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject =
             Nothing -> return (matchEnv0, Nothing)
             Just f  -> do
                 logRef <- newIORef []
-                let matchEnv0 = matchEnv0{
+                let matchEnv1 = matchEnv0{
                         matchEnvSubCallout = Just $ \info -> do
                             result <- f info
                             modifyIORef' logRef (result :)
                             return result}
-                return (matchEnv0, Just (f, logRef))
+                return (matchEnv1, Just (f, logRef))
 
         maybeResult1 <-
             withMatchCtxPtrFromEnv matchEnv1 subject $ \ctxPtr ->
