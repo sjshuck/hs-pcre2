@@ -58,6 +58,8 @@ unchompedLines s = case break (== '\n') s of
 fix1 :: a -> ((a -> b) -> a -> b) -> b
 fix1 x f = fix f x
 
+-- | A register to stash any exception caught in a user-supplied function so we
+-- can rethrow it after returning from C.
 newERef :: IO (IORef (Maybe SomeException))
 newERef = newIORef Nothing
 
@@ -65,18 +67,22 @@ newERef = newIORef Nothing
 
 type FfiWrapper f = f -> IO (FunPtr f)
 
+foreign import ccall "wrapper" mkRecursionGuard :: FfiWrapper
+    (CUInt -> Ptr a -> IO CInt)
+
+foreign import ccall "wrapper" mkCallout :: FfiWrapper
+    (Ptr block -> Ptr a -> IO CInt)
+
 -- These are unsafe imports and should not be exported if
 -- pcre2_general_context_create is also part of the API.
 foreign import capi unsafe "pcre2.h &pcre2_code_free_8"
     pcre2_code_finalizer :: FinalizerPtr Pcre2_code
-foreign import capi unsafe "pcre2.h &pcre2_compile_context_free_8"
-    pcre2_compile_context_finalizer :: FinalizerPtr Pcre2_compile_context
 foreign import capi unsafe "pcre2.h &pcre2_match_context_free_8"
     pcre2_match_context_finalizer :: FinalizerPtr Pcre2_match_context
 foreign import capi unsafe "pcre2.h &pcre2_match_data_free_8"
     pcre2_match_data_finalizer :: FinalizerPtr Pcre2_match_data
 
--- ** Fast @Text@ slicing
+-- ** Fast `Text` slicing
 
 data Slice = Slice
     {-# UNPACK #-} !Text.I8
@@ -161,23 +167,30 @@ mapMS f = fix $ \go -> \case
     StreamYield y sx -> StreamEffect $ f y <&> \y' -> StreamYield y' $ go sx
     StreamEffect ms  -> StreamEffect $ go <$> ms
 
--- | Unsafely, lazily tear down a `Stream` into a pure list of values yielded.
-unsafeLazyStreamToList :: Stream b IO a -> [b]
-unsafeLazyStreamToList = fix $ \continue -> \case
+-- | Unsafely tear down a `Stream` into a lazy, pure list of values yielded.
+unsafeStreamToLazyList :: Stream b IO a -> [b]
+unsafeStreamToLazyList = fix $ \continue -> \case
     StreamPure _    -> []
     StreamYield y s -> y : continue s
     StreamEffect ms -> continue $ unsafePerformIO ms
 
 -- ** Early return
 
+-- | A monad transformer that adds the ability to return early from a
+-- computation.  Semantically it is not a @MonadError@ but in implementation it
+-- is.
 newtype EarlyReturnT e m a = EarlyReturnT (ExceptT e m a)
     deriving (Functor, Applicative, Monad, MonadTrans, MonadIO)
 
+-- | Return early with a value of the same type as the computation would end
+-- with normally.
 earlyReturn :: (Monad m) => a -> EarlyReturnT a m a
 earlyReturn = EarlyReturnT . throwError
 
+-- | Run a computation that can `earlyReturn`.  The result must be the same type
+-- whether it returns early or normally.
 runEarlyReturnT :: (Functor m) => EarlyReturnT a m a -> m a
-runEarlyReturnT (EarlyReturnT ama) = either id id <$> runExceptT ama
+runEarlyReturnT (EarlyReturnT action) = either id id <$> runExceptT action
 
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
@@ -191,10 +204,8 @@ runEarlyReturnT (EarlyReturnT ama) = either id id <$> runExceptT ama
 -- subjected to teardown and `unsafePerformIO`.
 type Matcher = Text -> Stream MatchData IO ()
 
--- | A substitution function.  It takes a subject and produces the number of
--- substitutions performed (0 or 1, or more if `SubGlobal`) along with the
--- transformed subject.  Currently the number is unused.
-type Subber = Text -> IO (CInt, Text)
+-- | A substitution function.
+type Subber = Text -> IO Text
 
 -- ** Options
 
@@ -458,14 +469,11 @@ subCalloutResultToC SubCalloutAccept =  0
 subCalloutResultToC SubCalloutSkip   =  1
 subCalloutResultToC SubCalloutAbort  = -1
 
-class CalloutPtr ptr where
-
 -- ** Lower-level representation of options and C data
 
-type CompileContext = ForeignPtr Pcre2_compile_context
-type Code           = ForeignPtr Pcre2_code
-type MatchContext   = ForeignPtr Pcre2_match_context
-type MatchData      = ForeignPtr Pcre2_match_data
+type Code         = ForeignPtr Pcre2_code
+type MatchContext = ForeignPtr Pcre2_match_context
+type MatchData    = ForeignPtr Pcre2_match_data
 
 -- | An `Option` can result in multiple \"plans\".
 applyOption :: Option -> [AppliedOption]
@@ -532,12 +540,6 @@ applyOption = \case
     SubUnknownUnset    -> [MatchOption pcre2_SUBSTITUTE_UNKNOWN_UNSET]
     SubUnsetEmpty      -> [MatchOption pcre2_SUBSTITUTE_UNSET_EMPTY]
 
-    -- CalloutOption
-    UnsafeCallout f -> [CalloutOption f]
-
-    -- SubCalloutOption
-    UnsafeSubCallout f -> [SubCalloutOption f]
-
     -- MatchContextOption
     DepthLimit limit -> ctxUpd MatchContextOption
         pcre2_set_depth_limit (fromIntegral limit)
@@ -548,6 +550,12 @@ applyOption = \case
     OffsetLimit limit ->
         CompileOption pcre2_USE_OFFSET_LIMIT :
         ctxUpd MatchContextOption pcre2_set_offset_limit (fromIntegral limit)
+
+    -- CalloutOption
+    UnsafeCallout f -> [CalloutOption f]
+
+    -- SubCalloutOption
+    UnsafeSubCallout f -> [SubCalloutOption f]
 
     where
     ctxUpd ctor f x = [ctor $ \ctxPtr -> f ctxPtr x >>= check (== 0)]
@@ -574,12 +582,12 @@ _CompileRecGuardOption f =
     \case CompileRecGuardOption x -> CompileRecGuardOption <$> f x; o -> pure o
 _MatchOption f =
     \case MatchOption x -> MatchOption <$> f x; o -> pure o
+_MatchContextOption f =
+    \case MatchContextOption x -> MatchContextOption <$> f x; o -> pure o
 _CalloutOption f =
     \case CalloutOption x -> CalloutOption <$> f x; o -> pure o
 _SubCalloutOption f =
     \case SubCalloutOption x -> SubCalloutOption <$> f x; o -> pure o
-_MatchContextOption f =
-    \case MatchContextOption x -> MatchContextOption <$> f x; o -> pure o
 
 -- ** Extracting options at the right times
 --
@@ -595,54 +603,61 @@ extractOptsOf :: Getting (First a) AppliedOption a -> ExtractOpts [a]
 extractOptsOf prism = state $ partitionEithers . map discrim where
     discrim opt = maybe (Right opt) Left $ opt ^? prism
 
--- | Prepare to compile a `Code`.
+-- | Run an action passing a new `pcre2_compile_context` and ensure disposal
+-- afterwards.
+withNewCompileCtxPtr :: (Ptr Pcre2_compile_context -> IO a) -> IO a
+withNewCompileCtxPtr = bracket
+    (pcre2_compile_context_create nullPtr)
+    pcre2_compile_context_free
+
+-- | Run an action, first setting a recursion guard user function in a
+-- @pcre2_compile_context@, and ensure disposal of the `FunPtr` afterwards.
+-- Also rethrow any exceptions incurred in the user function.
+withSetRecGuard :: Ptr Pcre2_compile_context -> (Int -> IO Bool) -> IO a -> IO a
+withSetRecGuard ctxPtr f action = do
+    eRef <- newERef
+    let acquireFunPtr = mkRecursionGuard $ \depth _ ->
+            try (f (fromIntegral depth) >>= evaluate) >>= \case
+                Right success -> return $ if success then 0 else 1
+                Left e        -> writeIORef eRef (Just e) >> return 1
+    ret <- bracket acquireFunPtr freeHaskellFunPtr $ \funPtr -> do
+        pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>=
+            check (== 0)
+        action
+    readIORef eRef >>= mapM_ throwIO
+    return ret
+
+-- | Compile a @pcre2_code@, which is what PCRE2 calls a compiled pattern.
 extractCode :: Text -> ExtractOpts Code
 extractCode patt = do
-    ctxUpds <- extractOptsOf _CompileContextOption
+    opts <- bitOr <$> extractOptsOf _CompileOption
     xtraOpts <- bitOr <$> extractOptsOf _CompileExtraOption
+    ctxUpds <- extractOptsOf _CompileContextOption
     recGuard <- preview _last <$> extractOptsOf _CompileRecGuardOption
 
     let withCompileCtxPtr action
             | null ctxUpds && xtraOpts == 0 && null recGuard =
                 action nullPtr
-            | otherwise = withNonNullCompileCtxPtr $ \ctxPtr -> do
+            | otherwise = withNewCompileCtxPtr $ \ctxPtr -> do
                 forM_ ctxUpds $ \update -> update ctxPtr
                 when (xtraOpts /= 0) $
                     pcre2_set_compile_extra_options ctxPtr xtraOpts >>=
                         check (== 0)
                 maybe id (withSetRecGuard ctxPtr) recGuard $
                     action ctxPtr
-        withNonNullCompileCtxPtr = bracket
-            (pcre2_compile_context_create nullPtr)
-            pcre2_compile_context_free
-        withSetRecGuard ctxPtr f action = do
-            eRef <- newERef
-            let acquireFunPtr = mkRecursionGuard $ \depth _ ->
-                    try (f (fromIntegral depth) >>= evaluate) >>= \case
-                        Right success -> return $ if success then 0 else 1
-                        Left e        -> writeIORef eRef (Just e) >> return 1
-            ret <- bracket acquireFunPtr freeHaskellFunPtr $ \funPtr -> do
-                pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>=
-                    check (== 0)
-                action
-            readIORef eRef >>= mapM_ throwIO
-            return ret
-
-    opts <- bitOr <$> extractOptsOf _CompileOption
 
     liftIO $
         alloca $ \errorCodePtr ->
-        alloca $ \errorOffPtr -> do
-            codePtr <-
-                Text.useAsPtr patt $ \pattPtr pattCUs ->
-                withCompileCtxPtr $ \ctxPtr ->
-                    pcre2_compile
-                        (toCUs pattPtr)
-                        (fromIntegral pattCUs)
-                        (opts .|. pcre2_UTF)
-                        errorCodePtr
-                        errorOffPtr
-                        ctxPtr
+        alloca $ \errorOffPtr ->
+        Text.useAsPtr patt $ \pattPtr pattCUs ->
+        withCompileCtxPtr $ \ctxPtr -> do
+            codePtr <- pcre2_compile
+                (toCUs pattPtr)
+                (fromIntegral pattCUs)
+                (opts .|. pcre2_UTF)
+                errorCodePtr
+                errorOffPtr
+                ctxPtr
             when (codePtr == nullPtr) $ do
                 errorCode <- peek errorCodePtr
                 offCUs <- peek errorOffPtr
@@ -650,9 +665,8 @@ extractCode patt = do
 
             newForeignPtr pcre2_code_finalizer codePtr
 
--- | `Code` and auxiliary compiled data used in preparation for a match or
--- substitution.  This remains constant for the lifetime of a `Matcher` or
--- `Subber`.
+-- | `Code` and auxiliary data used in preparation for a match or substitution.
+-- This remains for the lifetime of a `Matcher` or `Subber`.
 data MatchEnv = MatchEnv{
     matchEnvCode       :: !Code,
     matchEnvOpts       :: !CUInt,
@@ -772,13 +786,12 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject =
                 outBufPtr
                 outLenPtr
 
-            checkAndGetOutput :: CInt -> PCRE2_SPTR -> IO (CInt, Text)
-            checkAndGetOutput 0      _         = return (0, subject)
+            checkAndGetOutput :: CInt -> PCRE2_SPTR -> IO Text
+            checkAndGetOutput 0      _         = return subject
             checkAndGetOutput result outBufPtr = do
                 check (> 0) result
                 outLen <- peek outLenPtr
-                out <- Text.fromPtr (fromCUs outBufPtr) (fromIntegral outLen)
-                return (result, out)
+                Text.fromPtr (fromCUs outBufPtr) (fromIntegral outLen)
 
         (matchEnv1, maybeSubCalloutAndLogRef) <- case matchEnvSubCallout of
             Nothing -> return (matchEnv0, Nothing)
@@ -862,6 +875,7 @@ withMatchCtxPtrFromEnv MatchEnv{..} subject action
         -- Pre-existing match context, so copy it.
         Just ctx -> withForeignPtr ctx pcre2_match_context_copy
 
+    -- Similar to withSetRecGuard, but for a regular callout user function.
     withSetCallout ctxPtr f action = do
         eRef <- newERef
         let acquireFunPtr = mkCallout $ \blockPtr _ -> do
@@ -877,6 +891,7 @@ withMatchCtxPtrFromEnv MatchEnv{..} subject action
         readIORef eRef >>= mapM_ throwIO
         return ret
 
+    -- Ditto for a substitution callout user function.
     withSetSubCallout ctxPtr f action = do
         eRef <- newERef
         let acquireFunPtr = mkCallout $ \blockPtr _ -> do
@@ -892,19 +907,8 @@ withMatchCtxPtrFromEnv MatchEnv{..} subject action
         readIORef eRef >>= mapM_ throwIO
         return ret
 
--- | Data computed during callouts that will be stashed in an IORef and
--- inspected after @pcre2_match()@ or similar completes.  Fake `Prism'`s
--- included.
-
-foreign import ccall "wrapper" mkRecursionGuard :: FfiWrapper
-    (CUInt -> Ptr a -> IO CInt)
-
-foreign import ccall "wrapper" mkCallout :: FfiWrapper
-    (Ptr block -> Ptr a -> IO CInt)
-
 -- | Within a callout, marshal the original subject and @pcre2_callout_block@
--- data to Haskell and present to the user function.  Ensure no pointers are
--- leaked!
+-- data to Haskell and present to the user function.
 getCalloutInfo :: Text -> Ptr Pcre2_callout_block -> IO CalloutInfo
 getCalloutInfo calloutSubject blockPtr = do
     calloutIndex <- do
@@ -947,7 +951,7 @@ getCalloutInfo calloutSubject blockPtr = do
 
 -- | Within a substitution callout, marshal the original subject and
 -- @pcre2_substitute_callout_block@ data to Haskell and present to the user
--- function.  Ensure no pointers are leaked!
+-- function.
 getSubCalloutInfo
     :: Text -> Ptr Pcre2_substitute_callout_block -> IO SubCalloutInfo
 getSubCalloutInfo subCalloutSubject blockPtr = do
@@ -987,7 +991,7 @@ _gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
     in Text.concat $ foldr mkSegments termSegments beforeAndAfter 0
 
     where
-    sliceAndCaptureTs = unsafeLazyStreamToList $
+    sliceAndCaptureTs = unsafeStreamToLazyList $
         mapMS (fromMatch >=> mapM enrichWithCapture) $ matcher subject
     enrichWithCapture slice = do
         capture <- evaluate $ smartSlice subject slice
@@ -1028,7 +1032,7 @@ _gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
 --   Template Haskell-generated @ViewPatterns@.
 type FromMatch t = MatchData -> IO (t Slice)
 
--- | Read all specifically indexed captures' offsets from match results.
+-- | Read all specifically-indexed captures' offsets from match results.
 getWhitelistedSlices :: (Traversable t) => t Int -> FromMatch t
 getWhitelistedSlices whitelist matchData =
     withForeignPtr matchData $ \matchDataPtr -> do
@@ -1123,7 +1127,7 @@ gsub = subOpt SubGlobal
 -- @
 subOpt :: Option -> Text -> Text -> Text -> Text
 subOpt option patt replacement =
-    snd . unsafePerformIO . pureUserSubber option patt replacement
+    unsafePerformIO . pureUserSubber option patt replacement
 
 -- | Given a pattern, produce a traversal (0 or more targets) that focuses from
 -- a subject to each non-empty list of captures that pattern matches.
