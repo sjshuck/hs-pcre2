@@ -1,6 +1,7 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RankNTypes #-}
@@ -11,6 +12,7 @@ module Text.Regex.Pcre2.Internal where
 import           Control.Applicative        (Alternative(..))
 import           Control.Exception
 import           Control.Monad
+import           Control.Monad.Except       (ExceptT, runExceptT, throwError)
 import           Control.Monad.State.Strict
 import           Data.Either                (partitionEithers)
 import           Data.Foldable              (foldl', toList)
@@ -62,11 +64,6 @@ newERef = newIORef Nothing
 -- ** FFI utilities
 
 type FfiWrapper f = f -> IO (FunPtr f)
-
--- | There is no @nullForeignPtr@ to pass to `withForeignPtr`, so we have to
--- fake it with a `Maybe`.
-withForeignOrNullPtr :: Maybe (ForeignPtr a) -> (Ptr a -> IO b) -> IO b
-withForeignOrNullPtr = maybe ($ nullPtr) withForeignPtr
 
 -- These are unsafe imports and should not be exported if
 -- pcre2_general_context_create is also part of the API.
@@ -170,6 +167,17 @@ unsafeLazyStreamToList = fix $ \continue -> \case
     StreamPure _    -> []
     StreamYield y s -> y : continue s
     StreamEffect ms -> continue $ unsafePerformIO ms
+
+-- ** Early return
+
+newtype EarlyReturnT e m a = EarlyReturnT (ExceptT e m a)
+    deriving (Functor, Applicative, Monad, MonadTrans, MonadIO)
+
+earlyReturn :: (Monad m) => a -> EarlyReturnT a m a
+earlyReturn = EarlyReturnT . throwError
+
+runEarlyReturnT :: (Functor m) => EarlyReturnT a m a -> m a
+runEarlyReturnT (EarlyReturnT ama) = either id id <$> runExceptT ama
 
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
@@ -602,7 +610,8 @@ extractCode patt = do
                 when (xtraOpts /= 0) $
                     pcre2_set_compile_extra_options ctxPtr xtraOpts >>=
                         check (== 0)
-                maybe id (withSetRecGuard ctxPtr) recGuard $ action ctxPtr
+                maybe id (withSetRecGuard ctxPtr) recGuard $
+                    action ctxPtr
         withNonNullCompileCtxPtr = bracket
             (pcre2_compile_context_create nullPtr)
             pcre2_compile_context_free
@@ -688,7 +697,7 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
             newForeignPtr pcre2_match_data_finalizer
 
     -- Loop over the subject, emitting match data until stopping.
-    return $ fix1 0 $ \continue curOff -> do
+    return $ runEarlyReturnT $ fix1 0 $ \continue curOff -> do
         result <- liftIO $
             withForeignPtr matchEnvCode $ \codePtr ->
             withForeignPtr subjForeignPtr $ \subjPtr ->
@@ -704,21 +713,22 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
                     ctxPtr
 
         -- Handle no match and errors
-        unless (result == pcre2_ERROR_NOMATCH) $ do
-            liftIO $ check (> 0) result
+        when (result == pcre2_ERROR_NOMATCH) $ earlyReturn ()
+        liftIO $ check (> 0) result
 
-            streamYield matchData
+        lift $ streamYield matchData
 
-            -- Determine next starting offset
-            nextOff <- liftIO $ do
-                ovecPtr <- withForeignPtr matchData
-                    pcre2_get_ovector_pointer
-                curOffEnd <- peekElemOff ovecPtr 1
-                -- Prevent infinite loop upon empty match
-                return $ max curOffEnd (curOff + 1)
+        -- Determine next starting offset
+        nextOff <- liftIO $ do
+            ovecPtr <- withForeignPtr matchData pcre2_get_ovector_pointer
+            curOffEnd <- peekElemOff ovecPtr 1
+            -- Prevent infinite loop upon empty match
+            return $ max curOffEnd (curOff + 1)
 
-            -- Handle end of subject
-            unless (nextOff > fromIntegral subjCUs) $ continue nextOff
+        -- Handle end of subject
+        when (nextOff > fromIntegral subjCUs) $ earlyReturn ()
+
+        continue nextOff
 
 -- | Helper to generate public matching functions.
 pureUserMatcher :: Option -> Text -> Matcher
@@ -746,7 +756,8 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject =
     withForeignPtr matchEnvCode $ \codePtr ->
     Text.useAsPtr subject $ \subjPtr subjCUs ->
     Text.useAsPtr replacement $ \replPtr replCUs ->
-    with (fromIntegral initOutLen) $ \outLenPtr -> do
+    with (fromIntegral initOutLen) $ \outLenPtr ->
+    runEarlyReturnT $ do
         let run :: CUInt -> Ptr Pcre2_match_context -> PCRE2_SPTR -> IO CInt
             run curOpts ctxPtr outBufPtr = pcre2_substitute
                 codePtr
@@ -772,7 +783,7 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject =
         (matchEnv1, maybeSubCalloutAndLogRef) <- case matchEnvSubCallout of
             Nothing -> return (matchEnv0, Nothing)
             Just f  -> do
-                logRef <- newIORef []
+                logRef <- liftIO $ newIORef []
                 let matchEnv1 = matchEnv0{
                         matchEnvSubCallout = Just $ \info -> do
                             result <- f info
@@ -780,34 +791,34 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject =
                             return result}
                 return (matchEnv1, Just (f, logRef))
 
-        maybeResult1 <-
+        maybeResultOut1 <- liftIO $
             withMatchCtxPtrFromEnv matchEnv1 subject $ \ctxPtr ->
             allocaArray initOutLen $ \outBufPtr -> do
                 result1 <- run pcre2_SUBSTITUTE_OVERFLOW_LENGTH ctxPtr outBufPtr
                 if result1 == pcre2_ERROR_NOMEMORY
                     then return Nothing
                     else Just <$> checkAndGetOutput result1 outBufPtr
+        mapM_ earlyReturn maybeResultOut1
 
-        case maybeResult1 of
-            Just result1 -> return result1
-            Nothing      -> do
-                -- The output was bigger than we guessed.  Try again.
-                computedOutLen <- fromIntegral <$> peek outLenPtr
-                -- Prepare the log to be replayed in FIFO order
-                forM_ maybeSubCalloutAndLogRef $ \(_, logRef) ->
-                    modifyIORef logRef reverse
-                let matchEnv2 = matchEnv0{
-                        -- Do not run regular callouts again.
-                        matchEnvCallout = Nothing,
-                        -- Do not run any substitution callouts run previously.
-                        matchEnvSubCallout = maybeSubCalloutAndLogRef
-                            <&> \(f, logRef) info -> readIORef logRef >>= \case
-                                r : rs -> writeIORef logRef rs >> return r
-                                []     -> f info}
-                withMatchCtxPtrFromEnv matchEnv2 subject $ \ctxPtr ->
-                    allocaArray computedOutLen $ \outBufPtr -> do
-                        result2 <- run 0 ctxPtr outBufPtr
-                        checkAndGetOutput result2 outBufPtr
+        -- The output was bigger than we guessed.  Try again.
+        computedOutLen <- liftIO $ fromIntegral <$> peek outLenPtr
+        -- Prepare the log to be replayed in FIFO order
+        forM_ maybeSubCalloutAndLogRef $ \(_, logRef) ->
+            liftIO $ modifyIORef logRef reverse
+        let replay (f, logRef) info = readIORef logRef >>= \case
+                r : rs -> writeIORef logRef rs >> return r
+                []     -> f info
+            matchEnv2 = matchEnv0{
+                -- Do not run regular callouts again.
+                matchEnvCallout = Nothing,
+                -- Do not run any substitution callouts run previously.
+                matchEnvSubCallout = replay <$> maybeSubCalloutAndLogRef}
+
+        liftIO $
+            withMatchCtxPtrFromEnv matchEnv2 subject $ \ctxPtr ->
+            allocaArray computedOutLen $ \outBufPtr -> do
+                result2 <- run 0 ctxPtr outBufPtr
+                checkAndGetOutput result2 outBufPtr
 
     where
     -- Guess the size of the output to be <= 2x that of the subject.
@@ -837,7 +848,7 @@ withMatchCtxPtrFromEnv
     -> IO a
 withMatchCtxPtrFromEnv MatchEnv{..} subject action
     | null matchEnvCallout && null matchEnvSubCallout =
-        withForeignOrNullPtr matchEnvCtx action
+        maybe ($ nullPtr) withForeignPtr matchEnvCtx action
     | otherwise =
         bracket acquireCtxPtr pcre2_match_context_free $ \ctxPtr ->
         maybe id (withSetCallout ctxPtr) matchEnvCallout $
