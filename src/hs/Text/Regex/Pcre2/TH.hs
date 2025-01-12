@@ -136,10 +136,7 @@ predictCapturesInfo option patt = do
                 (hi, lo) <- forOf each (0, 1) $ \off ->
                     fromIntegral @CUChar <$> peekByteOff entryPtr off
                 return $ hi `shiftL` 8 + lo
-            groupNameLen <- lengthArray0 0 groupNamePtr
-            groupName <- Text.fromPtr
-                (fromCUs groupNamePtr)
-                (fromIntegral groupNameLen)
+            groupName <- Text.fromPtr0 $ fromCUs groupNamePtr
             return (groupName, groupNumber)
 
         hiCaptNum <- getCodeInfo @CUInt codePtr pcre2_INFO_CAPTURECOUNT
