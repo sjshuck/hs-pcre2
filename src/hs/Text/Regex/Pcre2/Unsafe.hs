@@ -1,5 +1,3 @@
-{-# LANGUAGE CApiFFI #-}
-
 -- | These items are unsafe for one reason or another, and are sequestered here
 -- to require the user to do an extra import to get them.
 --

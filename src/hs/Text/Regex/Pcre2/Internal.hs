@@ -177,7 +177,7 @@ unsafeStreamToLazyList = fix $ \continue -> \case
 -- ** Early return
 
 -- | A monad transformer that adds the ability to return early from a
--- computation.  Semantically it is not a @MonadError@ but in implementation it
+-- computation.  Semantically it is not an error monad but in implementation it
 -- is.
 newtype EarlyReturnT e m a = EarlyReturnT (ExceptT e m a)
     deriving (Functor, Applicative, Monad, MonadTrans, MonadIO)
@@ -603,16 +603,17 @@ extractOptsOf :: Getting (First a) AppliedOption a -> ExtractOpts [a]
 extractOptsOf prism = state $ partitionEithers . map discrim where
     discrim opt = maybe (Right opt) Left $ opt ^? prism
 
--- | Run an action passing a new `pcre2_compile_context` and ensure disposal
--- afterwards.
+-- | Helper for `extractCode`.  Run an action passing a new
+-- @pcre2_compile_context@ and ensure disposal afterwards.
 withNewCompileCtxPtr :: (Ptr Pcre2_compile_context -> IO a) -> IO a
 withNewCompileCtxPtr = bracket
     (pcre2_compile_context_create nullPtr)
     pcre2_compile_context_free
 
--- | Run an action, first setting a recursion guard user function in a
--- @pcre2_compile_context@, and ensure disposal of the `FunPtr` afterwards.
--- Also rethrow any exceptions incurred in the user function.
+-- | Helper for `extractCode`.  Run an action, first setting a recursion guard
+-- user function in a @pcre2_compile_context@, and ensure disposal of the
+-- `FunPtr` afterwards.  Also rethrow any exceptions incurred in the user
+-- function.
 withSetRecGuard :: Ptr Pcre2_compile_context -> (Int -> IO Bool) -> IO a -> IO a
 withSetRecGuard ctxPtr f action = do
     eRef <- newERef
@@ -621,8 +622,7 @@ withSetRecGuard ctxPtr f action = do
                 Right success -> return $ if success then 0 else 1
                 Left e        -> writeIORef eRef (Just e) >> return 1
     ret <- bracket acquireFunPtr freeHaskellFunPtr $ \funPtr -> do
-        pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>=
-            check (== 0)
+        pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>= check (== 0)
         action
     readIORef eRef >>= mapM_ throwIO
     return ret
@@ -762,9 +762,8 @@ pureUserMatcher option patt =
 --
 -- * those substitution callouts that had run the first time.
 --
--- Therefore, the first time, log the substitution callout indexes that had run
--- along with their results, and replay the log the second time, returning those
--- same results without re-incurring effects.
+-- Therefore, the first time, log the substitution callout results, and replay
+-- the log the second time, returning them without re-incurring effects.
 subberWithEnv :: MatchEnv -> Text -> Subber
 subberWithEnv matchEnv0@MatchEnv{..} replacement subject =
     withForeignPtr matchEnvCode $ \codePtr ->
@@ -815,8 +814,8 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject =
 
         -- The output was bigger than we guessed.  Try again.
         computedOutLen <- liftIO $ fromIntegral <$> peek outLenPtr
-        -- Prepare the log to be replayed in FIFO order
         forM_ maybeSubCalloutAndLogRef $ \(_, logRef) ->
+            -- Prepare the log to be replayed in FIFO order
             liftIO $ modifyIORef logRef reverse
         let replay (f, logRef) info = readIORef logRef >>= \case
                 r : rs -> writeIORef logRef rs >> return r
@@ -847,13 +846,8 @@ pureUserSubber option patt =
 --
 -- We need to save and inspect state that occurs in potentially concurrent
 -- matches.  This means a new state ref for each match, which means a new
--- `FunPtr` to close on it, which means a new match context to set it to.
---
--- Install C function pointers in the @pcre2_match_context@.  When dereferenced
--- and called, they will force the user-supplied Haskell callout functions and
--- their results, catching any exceptions and saving them.
-
--- Install callout, if any
+-- `FunPtr` to close on it, which means a new match context in which to install
+-- it.
 withMatchCtxPtrFromEnv
     :: MatchEnv
     -> Text -- ^ Callout info requires access to the original subject.
@@ -891,7 +885,7 @@ withMatchCtxPtrFromEnv MatchEnv{..} subject action
         readIORef eRef >>= mapM_ throwIO
         return ret
 
-    -- Ditto for a substitution callout user function.
+    -- Ditto for a substitution callout.
     withSetSubCallout ctxPtr f action = do
         eRef <- newERef
         let acquireFunPtr = mkCallout $ \blockPtr _ -> do
