@@ -1,7 +1,6 @@
 {-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RankNTypes #-}
@@ -12,7 +11,7 @@ module Text.Regex.Pcre2.Internal where
 import           Control.Applicative        (Alternative(..))
 import           Control.Exception
 import           Control.Monad
-import           Control.Monad.Except       (ExceptT, runExceptT, throwError)
+import           Control.Monad.Cont
 import           Control.Monad.State.Strict
 import           Data.Either                (partitionEithers)
 import           Data.Foldable              (foldl', toList)
@@ -45,24 +44,6 @@ unchompedLines s = case break (== '\n') s of
     (line,     _ : rest) -> (line ++ "\n") : unchompedLines rest
     (lastLine, "")       -> [lastLine | not $ null lastLine]
 
--- | Equivalent to @flip fix@.
---
--- Used to express a recursive function of one argument that is called only once
--- on an initial value:
---
--- > let go x = ... in go x0
---
--- as:
---
--- > fix1 x0 $ \go x -> ...
-fix1 :: a -> ((a -> b) -> a -> b) -> b
-fix1 x f = fix f x
-
--- | A register to stash any exception caught in a user-supplied function so we
--- can rethrow it after returning from C.
-newERef :: IO (IORef (Maybe SomeException))
-newERef = newIORef Nothing
-
 -- ** FFI utilities
 
 type FfiWrapper f = f -> IO (FunPtr f)
@@ -72,6 +53,22 @@ foreign import ccall "wrapper" mkRecursionGuard :: FfiWrapper
 
 foreign import ccall "wrapper" mkCallout :: FfiWrapper
     (Ptr block -> Ptr a -> IO CInt)
+
+-- | A register to save any exception caught in a user-supplied function so we
+-- can rethrow it after returning from C.
+type ERef = IORef (Maybe SomeException)
+
+saveE :: ERef -> SomeException -> IO ()
+saveE eRef = writeIORef eRef . Just
+
+-- | Create an `ERef`, and allow it to be used in the creation of a `FunPtr`
+-- wrapping a user-supplied function.  Ensure the @FunPtr@ is freed and any
+-- exception is rethrown.
+userFunPtr :: (ERef -> IO (FunPtr a)) -> ContT r IO (FunPtr a)
+userFunPtr mkFunPtr = do
+    eRef <- liftIO $ newIORef Nothing
+    ContT $ \continue -> continue () <* (readIORef eRef >>= mapM_ throwIO)
+    ContT $ bracket (mkFunPtr eRef) freeHaskellFunPtr
 
 -- These are unsafe imports and should not be exported if
 -- pcre2_general_context_create is also part of the API.
@@ -161,8 +158,8 @@ streamYield :: b -> Stream b m ()
 streamYield y = StreamYield y $ StreamPure ()
 
 -- | Effectfully transform yielded values.
-mapMS :: (Functor m) => (b -> m c) -> Stream b m a -> Stream c m a
-mapMS f = fix $ \go -> \case
+streamMap :: (Functor m) => (b -> m c) -> Stream b m a -> Stream c m a
+streamMap f = fix $ \go -> \case
     StreamPure x     -> StreamPure x
     StreamYield y sx -> StreamEffect $ f y <&> \y' -> StreamYield y' $ go sx
     StreamEffect ms  -> StreamEffect $ go <$> ms
@@ -173,24 +170,6 @@ unsafeStreamToLazyList = fix $ \continue -> \case
     StreamPure _    -> []
     StreamYield y s -> y : continue s
     StreamEffect ms -> continue $ unsafePerformIO ms
-
--- ** Early return
-
--- | A monad transformer that adds the ability to return early from a
--- computation.  Semantically it is not an error monad but in implementation it
--- is.
-newtype EarlyReturnT e m a = EarlyReturnT (ExceptT e m a)
-    deriving (Functor, Applicative, Monad, MonadTrans, MonadIO)
-
--- | Return early with a value of the same type as the computation would end
--- with normally.
-earlyReturn :: (Monad m) => a -> EarlyReturnT a m a
-earlyReturn = EarlyReturnT . throwError
-
--- | Run a computation that can `earlyReturn`.  The result must be the same type
--- whether it returns early or normally.
-runEarlyReturnT :: (Functor m) => EarlyReturnT a m a -> m a
-runEarlyReturnT (EarlyReturnT action) = either id id <$> runExceptT action
 
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
@@ -603,67 +582,63 @@ extractOptsOf :: Getting (First a) AppliedOption a -> ExtractOpts [a]
 extractOptsOf prism = state $ partitionEithers . map discrim where
     discrim opt = maybe (Right opt) Left $ opt ^? prism
 
--- | Helper for `extractCode`.  Run an action passing a new
--- @pcre2_compile_context@ and ensure disposal afterwards.
-withNewCompileCtxPtr :: (Ptr Pcre2_compile_context -> IO a) -> IO a
-withNewCompileCtxPtr = bracket
-    (pcre2_compile_context_create nullPtr)
-    pcre2_compile_context_free
+-- | Helper for `extractCode`.  Create a @pcre2_compile_context@ pointer if
+-- necessary, apply any options, return it, and clean up after use.
+compileCtxPtr
+    :: CUInt                                 -- ^ extra compile options
+    -> [Ptr Pcre2_compile_context -> IO ()]  -- ^ updates to the context
+    -> Maybe (Int -> IO Bool)                -- ^ user recursion guard function
+    -> ContT Code IO (Ptr Pcre2_compile_context)
+compileCtxPtr 0        []      Nothing  = return nullPtr
+compileCtxPtr xtraOpts ctxUpds recGuard = do
+    ctxPtr <- ContT $ bracket
+        (pcre2_compile_context_create nullPtr)
+        pcre2_compile_context_free
 
--- | Helper for `extractCode`.  Run an action, first setting a recursion guard
--- user function in a @pcre2_compile_context@, and ensure disposal of the
--- `FunPtr` afterwards.  Also rethrow any exceptions incurred in the user
--- function.
-withSetRecGuard :: Ptr Pcre2_compile_context -> (Int -> IO Bool) -> IO a -> IO a
-withSetRecGuard ctxPtr f action = do
-    eRef <- newERef
-    let acquireFunPtr = mkRecursionGuard $ \depth _ ->
+    liftIO $ forM_ ctxUpds $ \update -> update ctxPtr
+
+    when (xtraOpts /= 0) $ liftIO $
+        pcre2_set_compile_extra_options ctxPtr xtraOpts >>= check (== 0)
+
+    forM_ recGuard $ \f -> do
+        funPtr <- userFunPtr $ \eRef -> mkRecursionGuard $ \depth _ ->
             try (f (fromIntegral depth) >>= evaluate) >>= \case
                 Right success -> return $ if success then 0 else 1
-                Left e        -> writeIORef eRef (Just e) >> return 1
-    ret <- bracket acquireFunPtr freeHaskellFunPtr $ \funPtr -> do
-        pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>= check (== 0)
-        action
-    readIORef eRef >>= mapM_ throwIO
-    return ret
+                Left e        -> saveE eRef e >> return 1
+        liftIO $ pcre2_set_compile_recursion_guard ctxPtr funPtr nullPtr >>=
+            check (== 0)
+
+    return ctxPtr
 
 -- | Compile a @pcre2_code@, which is what PCRE2 calls a compiled pattern.
 extractCode :: Text -> ExtractOpts Code
 extractCode patt = do
     opts <- bitOr <$> extractOptsOf _CompileOption
+
     xtraOpts <- bitOr <$> extractOptsOf _CompileExtraOption
     ctxUpds <- extractOptsOf _CompileContextOption
     recGuard <- preview _last <$> extractOptsOf _CompileRecGuardOption
 
-    let withCompileCtxPtr action
-            | null ctxUpds && xtraOpts == 0 && null recGuard =
-                action nullPtr
-            | otherwise = withNewCompileCtxPtr $ \ctxPtr -> do
-                forM_ ctxUpds $ \update -> update ctxPtr
-                when (xtraOpts /= 0) $
-                    pcre2_set_compile_extra_options ctxPtr xtraOpts >>=
-                        check (== 0)
-                maybe id (withSetRecGuard ctxPtr) recGuard $
-                    action ctxPtr
+    liftIO $ evalContT $ do
+        (pattPtr, pattCUs) <- ContT $ Text.useAsPtr patt . curry
+        errorCodePtr <- ContT alloca
+        errorOffPtr <- ContT alloca
 
-    liftIO $
-        alloca $ \errorCodePtr ->
-        alloca $ \errorOffPtr ->
-        Text.useAsPtr patt $ \pattPtr pattCUs ->
-        withCompileCtxPtr $ \ctxPtr -> do
-            codePtr <- pcre2_compile
-                (toCUs pattPtr)
-                (fromIntegral pattCUs)
-                (opts .|. pcre2_UTF)
-                errorCodePtr
-                errorOffPtr
-                ctxPtr
-            when (codePtr == nullPtr) $ do
-                errorCode <- peek errorCodePtr
-                offCUs <- peek errorOffPtr
-                throwIO $ Pcre2CompileException errorCode patt offCUs
+        ctxPtr <- compileCtxPtr xtraOpts ctxUpds recGuard
 
-            newForeignPtr pcre2_code_finalizer codePtr
+        codePtr <- liftIO $ pcre2_compile
+            (toCUs pattPtr)
+            (fromIntegral pattCUs)
+            (opts .|. pcre2_UTF)
+            errorCodePtr
+            errorOffPtr
+            ctxPtr
+        when (codePtr == nullPtr) $ liftIO $ do
+            errorCode <- peek errorCodePtr
+            offCUs <- peek errorOffPtr
+            throwIO $ Pcre2CompileException errorCode patt offCUs
+
+        liftIO $ newForeignPtr pcre2_code_finalizer codePtr
 
 -- | `Code` and auxiliary data used in preparation for a match or substitution.
 -- This remains for the lifetime of a `Matcher` or `Subber`.
@@ -711,23 +686,26 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
             newForeignPtr pcre2_match_data_finalizer
 
     -- Loop over the subject, emitting match data until stopping.
-    return $ runEarlyReturnT $ fix1 0 $ \continue curOff -> do
-        result <- liftIO $
-            withForeignPtr matchEnvCode $ \codePtr ->
-            withForeignPtr subjForeignPtr $ \subjPtr ->
-            withForeignPtr matchData $ \matchDataPtr ->
-            withMatchCtxPtrFromEnv matchEnv subject $ \ctxPtr ->
-                pcre2_match
-                    codePtr
-                    (toCUs subjPtr)
-                    (fromIntegral subjCUs)
-                    curOff
-                    matchEnvOpts
-                    matchDataPtr
-                    ctxPtr
+    return $ evalContT $ callCC $ \stop -> do
+        (continue, curOff) <- label 0
+
+        result <- liftIO $ evalContT $ do
+            codePtr <- ContT $ withForeignPtr matchEnvCode
+            subjPtr <- ContT $ withForeignPtr subjForeignPtr
+            matchDataPtr <- ContT $ withForeignPtr matchData
+            ctxPtr <- matchCtxPtr matchEnv subject
+
+            liftIO $ pcre2_match
+                codePtr
+                (toCUs subjPtr)
+                (fromIntegral subjCUs)
+                curOff
+                matchEnvOpts
+                matchDataPtr
+                ctxPtr
 
         -- Handle no match and errors
-        when (result == pcre2_ERROR_NOMATCH) $ earlyReturn ()
+        when (result == pcre2_ERROR_NOMATCH) $ stop ()
         liftIO $ check (> 0) result
 
         lift $ streamYield matchData
@@ -740,7 +718,7 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
             return $ max curOffEnd (curOff + 1)
 
         -- Handle end of subject
-        when (nextOff > fromIntegral subjCUs) $ earlyReturn ()
+        when (nextOff > fromIntegral subjCUs) $ stop ()
 
         continue nextOff
 
@@ -765,12 +743,13 @@ pureUserMatcher option patt =
 -- Therefore, the first time, log the substitution callout results, and replay
 -- the log the second time, returning them without re-incurring effects.
 subberWithEnv :: MatchEnv -> Text -> Subber
-subberWithEnv matchEnv0@MatchEnv{..} replacement subject =
-    withForeignPtr matchEnvCode $ \codePtr ->
-    Text.useAsPtr subject $ \subjPtr subjCUs ->
-    Text.useAsPtr replacement $ \replPtr replCUs ->
-    with (fromIntegral initOutLen) $ \outLenPtr ->
-    runEarlyReturnT $ do
+subberWithEnv matchEnv0@MatchEnv{..} replacement subject = evalContT $ do
+    codePtr <- ContT $ withForeignPtr matchEnvCode
+    (subjPtr, subjCUs) <- ContT $ Text.useAsPtr subject . curry
+    (replPtr, replCUs) <- ContT $ Text.useAsPtr replacement . curry
+    outLenPtr <- ContT $ with $ fromIntegral initOutLen
+
+    callCC $ \stop -> do
         let run :: CUInt -> Ptr Pcre2_match_context -> PCRE2_SPTR -> IO CInt
             run curOpts ctxPtr outBufPtr = pcre2_substitute
                 codePtr
@@ -803,18 +782,19 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject =
                             return result}
                 return (matchEnv1, Just (f, logRef))
 
-        maybeResultOut1 <- liftIO $
-            withMatchCtxPtrFromEnv matchEnv1 subject $ \ctxPtr ->
-            allocaArray initOutLen $ \outBufPtr -> do
-                result1 <- run pcre2_SUBSTITUTE_OVERFLOW_LENGTH ctxPtr outBufPtr
-                if result1 == pcre2_ERROR_NOMEMORY
-                    then return Nothing
-                    else Just <$> checkAndGetOutput result1 outBufPtr
-        mapM_ earlyReturn maybeResultOut1
+        maybeOut1 <- liftIO $ evalContT $ do
+            ctxPtr <- matchCtxPtr matchEnv1 subject
+            outBufPtr <- ContT $ allocaArray initOutLen
+            result1 <- liftIO $
+                run pcre2_SUBSTITUTE_OVERFLOW_LENGTH ctxPtr outBufPtr
+            if result1 == pcre2_ERROR_NOMEMORY
+                then return Nothing
+                else liftIO $ Just <$> checkAndGetOutput result1 outBufPtr
+        mapM_ stop maybeOut1
 
         -- The output was bigger than we guessed.  Try again.
         computedOutLen <- liftIO $ fromIntegral <$> peek outLenPtr
-        forM_ maybeSubCalloutAndLogRef $ \(_, logRef) ->
+        forM_ maybeSubCalloutAndLogRef $ \(_, logRef) -> do
             -- Prepare the log to be replayed in FIFO order
             liftIO $ modifyIORef logRef reverse
         let replay (f, logRef) info = readIORef logRef >>= \case
@@ -826,11 +806,11 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject =
                 -- Do not run any substitution callouts run previously.
                 matchEnvSubCallout = replay <$> maybeSubCalloutAndLogRef}
 
-        liftIO $
-            withMatchCtxPtrFromEnv matchEnv2 subject $ \ctxPtr ->
-            allocaArray computedOutLen $ \outBufPtr -> do
-                result2 <- run 0 ctxPtr outBufPtr
-                checkAndGetOutput result2 outBufPtr
+        ctxPtr <- matchCtxPtr matchEnv2 subject
+        outBufPtr <- ContT $ allocaArray computedOutLen
+        liftIO $ do
+            result2 <- run 0 ctxPtr outBufPtr
+            checkAndGetOutput result2 outBufPtr
 
     where
     -- Guess the size of the output to be <= 2x that of the subject.
@@ -843,24 +823,33 @@ pureUserSubber option patt =
     subberWithEnv $ unsafePerformIO $ userMatchEnv option patt
 
 -- | Generate per-call data for @pcre2_match()@ etc., to accommodate callouts.
---
--- We need to save and inspect state that occurs in potentially concurrent
--- matches.  This means a new state ref for each match, which means a new
--- `FunPtr` to close on it, which means a new match context in which to install
--- it.
-withMatchCtxPtrFromEnv
-    :: MatchEnv
-    -> Text -- ^ Callout info requires access to the original subject.
-    -> (Ptr Pcre2_match_context -> IO a)
-    -> IO a
-withMatchCtxPtrFromEnv MatchEnv{..} subject action
+-- Analogous to `compileCtxPtr`.
+matchCtxPtr :: MatchEnv -> Text -> ContT a IO (Ptr Pcre2_match_context)
+matchCtxPtr MatchEnv{..} subject
     | null matchEnvCallout && null matchEnvSubCallout =
-        maybe ($ nullPtr) withForeignPtr matchEnvCtx action
-    | otherwise =
-        bracket acquireCtxPtr pcre2_match_context_free $ \ctxPtr ->
-        maybe id (withSetCallout ctxPtr) matchEnvCallout $
-        maybe id (withSetSubCallout ctxPtr) matchEnvSubCallout $
-            action ctxPtr
+        maybe (return nullPtr) (ContT . withForeignPtr) matchEnvCtx
+
+    | otherwise = do
+        ctxPtr <- ContT $ bracket acquireCtxPtr pcre2_match_context_free
+
+        forM_ matchEnvCallout $ \f -> do
+            funPtr <- userFunPtr $ \eRef -> mkCallout $ \blockPtr _ -> do
+                info <- getCalloutInfo subject blockPtr
+                try (f info >>= evaluate) >>= \case
+                    Right result -> return $ calloutResultToC result
+                    Left e       -> saveE eRef e >> return pcre2_ERROR_CALLOUT
+            liftIO $ pcre2_set_callout ctxPtr funPtr nullPtr >>= check (== 0)
+
+        forM_ matchEnvSubCallout $ \f -> do
+            funPtr <- userFunPtr $ \eRef -> mkCallout $ \blockPtr _ -> do
+                info <- getSubCalloutInfo subject blockPtr
+                try (f info >>= evaluate) >>= \case
+                    Right result -> return $ subCalloutResultToC result
+                    Left e       -> saveE eRef e >> return (-1)
+            liftIO $ pcre2_set_substitute_callout ctxPtr funPtr nullPtr >>=
+                check (== 0)
+
+        return ctxPtr
 
     where
     acquireCtxPtr = case matchEnvCtx of
@@ -868,38 +857,6 @@ withMatchCtxPtrFromEnv MatchEnv{..} subject action
         Nothing -> pcre2_match_context_create nullPtr
         -- Pre-existing match context, so copy it.
         Just ctx -> withForeignPtr ctx pcre2_match_context_copy
-
-    -- Similar to withSetRecGuard, but for a regular callout user function.
-    withSetCallout ctxPtr f action = do
-        eRef <- newERef
-        let acquireFunPtr = mkCallout $ \blockPtr _ -> do
-                info <- getCalloutInfo subject blockPtr
-                try (f info >>= evaluate) >>= \case
-                    Right result -> return $ calloutResultToC result
-                    Left e       -> do
-                        writeIORef eRef $ Just e
-                        return pcre2_ERROR_CALLOUT
-        ret <- bracket acquireFunPtr freeHaskellFunPtr $ \funPtr -> do
-            pcre2_set_callout ctxPtr funPtr nullPtr >>= check (== 0)
-            action
-        readIORef eRef >>= mapM_ throwIO
-        return ret
-
-    -- Ditto for a substitution callout.
-    withSetSubCallout ctxPtr f action = do
-        eRef <- newERef
-        let acquireFunPtr = mkCallout $ \blockPtr _ -> do
-                info <- getSubCalloutInfo subject blockPtr
-                try (f info >>= evaluate) >>= \case
-                    Right result -> return $ subCalloutResultToC result
-                    Left e       -> do
-                        writeIORef eRef $ Just e
-                        return (-1)
-        ret <- bracket acquireFunPtr freeHaskellFunPtr $ \funPtr -> do
-            pcre2_set_substitute_callout ctxPtr funPtr nullPtr >>= check (== 0)
-            action
-        readIORef eRef >>= mapM_ throwIO
-        return ret
 
 -- | Within a callout, marshal the original subject and @pcre2_callout_block@
 -- data to Haskell and present to the user function.
@@ -986,7 +943,7 @@ _gcaptures matcher fromMatch f subject = traverse f captureTs <&> \captureTs' ->
 
     where
     sliceAndCaptureTs = unsafeStreamToLazyList $
-        mapMS (fromMatch >=> mapM enrichWithCapture) $ matcher subject
+        streamMap (fromMatch >=> mapM enrichWithCapture) $ matcher subject
     enrichWithCapture slice = do
         capture <- evaluate $ smartSlice subject slice
         return (slice, capture)
