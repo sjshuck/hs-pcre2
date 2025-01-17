@@ -61,14 +61,14 @@ type ERef = IORef (Maybe SomeException)
 saveE :: ERef -> SomeException -> IO ()
 saveE eRef = writeIORef eRef . Just
 
--- | Create an `ERef`, and allow it to be used in the creation of a `FunPtr`
+-- | Create an `ERef` and allow it to be used in the creation of a `FunPtr`
 -- wrapping a user-supplied function.  Ensure the @FunPtr@ is freed and any
 -- exception is rethrown.
-userFunPtr :: (ERef -> IO (FunPtr a)) -> ContT r IO (FunPtr a)
-userFunPtr mkFunPtr = do
-    eRef <- liftIO $ newIORef Nothing
-    ContT $ \continue -> continue () <* (readIORef eRef >>= mapM_ throwIO)
-    ContT $ bracket (mkFunPtr eRef) freeHaskellFunPtr
+mkFunPtrWithERef :: (ERef -> IO (FunPtr a)) -> ContT r IO (FunPtr a)
+mkFunPtrWithERef mkFunPtr = ContT $ \continue -> do
+    eRef <- newIORef Nothing
+    let rethrow = readIORef eRef >>= mapM_ throwIO
+    bracket (mkFunPtr eRef) freeHaskellFunPtr continue <* rethrow
 
 -- These are unsafe imports and should not be exported if
 -- pcre2_general_context_create is also part of the API.
@@ -584,13 +584,13 @@ extractOptsOf prism = state $ partitionEithers . map discrim where
 
 -- | Helper for `extractCode`.  Create a @pcre2_compile_context@ pointer if
 -- necessary, apply any options, return it, and clean up after use.
-compileCtxPtr
+mkCompileCtxPtr
     :: CUInt                                 -- ^ extra compile options
     -> [Ptr Pcre2_compile_context -> IO ()]  -- ^ updates to the context
     -> Maybe (Int -> IO Bool)                -- ^ user recursion guard function
     -> ContT Code IO (Ptr Pcre2_compile_context)
-compileCtxPtr 0        []      Nothing  = return nullPtr
-compileCtxPtr xtraOpts ctxUpds recGuard = do
+mkCompileCtxPtr 0        []      Nothing  = return nullPtr
+mkCompileCtxPtr xtraOpts ctxUpds recGuard = do
     ctxPtr <- ContT $ bracket
         (pcre2_compile_context_create nullPtr)
         pcre2_compile_context_free
@@ -601,7 +601,7 @@ compileCtxPtr xtraOpts ctxUpds recGuard = do
         pcre2_set_compile_extra_options ctxPtr xtraOpts >>= check (== 0)
 
     forM_ recGuard $ \f -> do
-        funPtr <- userFunPtr $ \eRef -> mkRecursionGuard $ \depth _ ->
+        funPtr <- mkFunPtrWithERef $ \eRef -> mkRecursionGuard $ \depth _ ->
             try (f (fromIntegral depth) >>= evaluate) >>= \case
                 Right success -> return $ if success then 0 else 1
                 Left e        -> saveE eRef e >> return 1
@@ -624,7 +624,7 @@ extractCode patt = do
         errorCodePtr <- ContT alloca
         errorOffPtr <- ContT alloca
 
-        ctxPtr <- compileCtxPtr xtraOpts ctxUpds recGuard
+        ctxPtr <- mkCompileCtxPtr xtraOpts ctxUpds recGuard
 
         codePtr <- liftIO $ pcre2_compile
             (toCUs pattPtr)
@@ -678,8 +678,8 @@ userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
     extractAll = extractCode patt >>= extractMatchEnv
 
 -- | A `MatchEnv` is sufficient to fully implement a matching function.
-matcherWithEnv :: MatchEnv -> Matcher
-matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
+matcherFromEnv :: MatchEnv -> Matcher
+matcherFromEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
     (subjForeignPtr, subjCUs) <- Text.asForeignPtr subject
     matchData <- withForeignPtr matchEnvCode $ \codePtr ->
         pcre2_match_data_create_from_pattern codePtr nullPtr >>=
@@ -693,7 +693,7 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
             codePtr <- ContT $ withForeignPtr matchEnvCode
             subjPtr <- ContT $ withForeignPtr subjForeignPtr
             matchDataPtr <- ContT $ withForeignPtr matchData
-            ctxPtr <- matchCtxPtr matchEnv subject
+            ctxPtr <- mkMatchCtxPtr matchEnv subject
 
             liftIO $ pcre2_match
                 codePtr
@@ -718,14 +718,12 @@ matcherWithEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
             return $ max curOffEnd (curOff + 1)
 
         -- Handle end of subject
-        when (nextOff > fromIntegral subjCUs) $ stop ()
-
-        continue nextOff
+        unless (nextOff > fromIntegral subjCUs) $ continue nextOff
 
 -- | Helper to generate public matching functions.
 pureUserMatcher :: Option -> Text -> Matcher
 pureUserMatcher option patt =
-    matcherWithEnv $ unsafePerformIO $ userMatchEnv option patt
+    matcherFromEnv $ unsafePerformIO $ userMatchEnv option patt
 
 -- | A `Subber` works by first writing results to a reasonably-sized buffer.  If
 -- we run out of room, PCRE2 allows us to simulate the rest of the substitution
@@ -742,8 +740,8 @@ pureUserMatcher option patt =
 --
 -- Therefore, the first time, log the substitution callout results, and replay
 -- the log the second time, returning them without re-incurring effects.
-subberWithEnv :: MatchEnv -> Text -> Subber
-subberWithEnv matchEnv0@MatchEnv{..} replacement subject = evalContT $ do
+subberFromEnvAndRepl :: MatchEnv -> Text -> Subber
+subberFromEnvAndRepl matchEnv0@MatchEnv{..} replacement subject = evalContT $ do
     codePtr <- ContT $ withForeignPtr matchEnvCode
     (subjPtr, subjCUs) <- ContT $ Text.useAsPtr subject . curry
     (replPtr, replCUs) <- ContT $ Text.useAsPtr replacement . curry
@@ -783,7 +781,7 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject = evalContT $ do
                 return (matchEnv1, Just (f, logRef))
 
         maybeOut1 <- liftIO $ evalContT $ do
-            ctxPtr <- matchCtxPtr matchEnv1 subject
+            ctxPtr <- mkMatchCtxPtr matchEnv1 subject
             outBufPtr <- ContT $ allocaArray initOutLen
             result1 <- liftIO $
                 run pcre2_SUBSTITUTE_OVERFLOW_LENGTH ctxPtr outBufPtr
@@ -794,7 +792,7 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject = evalContT $ do
 
         -- The output was bigger than we guessed.  Try again.
         computedOutLen <- liftIO $ fromIntegral <$> peek outLenPtr
-        forM_ maybeSubCalloutAndLogRef $ \(_, logRef) -> do
+        forM_ maybeSubCalloutAndLogRef $ \(_, logRef) ->
             -- Prepare the log to be replayed in FIFO order
             liftIO $ modifyIORef logRef reverse
         let replay (f, logRef) info = readIORef logRef >>= \case
@@ -806,7 +804,7 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject = evalContT $ do
                 -- Do not run any substitution callouts run previously.
                 matchEnvSubCallout = replay <$> maybeSubCalloutAndLogRef}
 
-        ctxPtr <- matchCtxPtr matchEnv2 subject
+        ctxPtr <- mkMatchCtxPtr matchEnv2 subject
         outBufPtr <- ContT $ allocaArray computedOutLen
         liftIO $ do
             result2 <- run 0 ctxPtr outBufPtr
@@ -820,12 +818,12 @@ subberWithEnv matchEnv0@MatchEnv{..} replacement subject = evalContT $ do
 -- `pureUserMatcher`.
 pureUserSubber :: Option -> Text -> Text -> Subber
 pureUserSubber option patt =
-    subberWithEnv $ unsafePerformIO $ userMatchEnv option patt
+    subberFromEnvAndRepl $ unsafePerformIO $ userMatchEnv option patt
 
 -- | Generate per-call data for @pcre2_match()@ etc., to accommodate callouts.
--- Analogous to `compileCtxPtr`.
-matchCtxPtr :: MatchEnv -> Text -> ContT a IO (Ptr Pcre2_match_context)
-matchCtxPtr MatchEnv{..} subject
+-- Analogous to `mkCompileCtxPtr`.
+mkMatchCtxPtr :: MatchEnv -> Text -> ContT r IO (Ptr Pcre2_match_context)
+mkMatchCtxPtr MatchEnv{..} subject
     | null matchEnvCallout && null matchEnvSubCallout =
         maybe (return nullPtr) (ContT . withForeignPtr) matchEnvCtx
 
@@ -833,7 +831,7 @@ matchCtxPtr MatchEnv{..} subject
         ctxPtr <- ContT $ bracket acquireCtxPtr pcre2_match_context_free
 
         forM_ matchEnvCallout $ \f -> do
-            funPtr <- userFunPtr $ \eRef -> mkCallout $ \blockPtr _ -> do
+            funPtr <- mkFunPtrWithERef $ \eRef -> mkCallout $ \blockPtr _ -> do
                 info <- getCalloutInfo subject blockPtr
                 try (f info >>= evaluate) >>= \case
                     Right result -> return $ calloutResultToC result
@@ -841,7 +839,7 @@ matchCtxPtr MatchEnv{..} subject
             liftIO $ pcre2_set_callout ctxPtr funPtr nullPtr >>= check (== 0)
 
         forM_ matchEnvSubCallout $ \f -> do
-            funPtr <- userFunPtr $ \eRef -> mkCallout $ \blockPtr _ -> do
+            funPtr <- mkFunPtrWithERef $ \eRef -> mkCallout $ \blockPtr _ -> do
                 info <- getSubCalloutInfo subject blockPtr
                 try (f info >>= evaluate) >>= \case
                     Right result -> return $ subCalloutResultToC result
