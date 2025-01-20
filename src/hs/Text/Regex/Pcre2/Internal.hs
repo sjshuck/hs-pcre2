@@ -747,39 +747,39 @@ subberFromEnvAndRepl matchEnv0@MatchEnv{..} replacement subject = evalContT $ do
     (replPtr, replCUs) <- ContT $ Text.useAsPtr replacement . curry
     outLenPtr <- ContT $ with $ fromIntegral initOutLen
 
+    let run :: CUInt -> Ptr Pcre2_match_context -> PCRE2_SPTR -> IO CInt
+        run curOpts ctxPtr outBufPtr = pcre2_substitute
+            codePtr
+            (toCUs subjPtr)
+            (fromIntegral subjCUs)
+            0
+            (matchEnvOpts .|. curOpts)
+            nullPtr
+            ctxPtr
+            (toCUs replPtr)
+            (fromIntegral replCUs)
+            outBufPtr
+            outLenPtr
+
+        checkAndGetOutput :: CInt -> PCRE2_SPTR -> IO Text
+        checkAndGetOutput 0      _         = return subject
+        checkAndGetOutput result outBufPtr = do
+            check (> 0) result
+            outLen <- peek outLenPtr
+            Text.fromPtr (fromCUs outBufPtr) (fromIntegral outLen)
+
     callCC $ \stop -> do
-        let run :: CUInt -> Ptr Pcre2_match_context -> PCRE2_SPTR -> IO CInt
-            run curOpts ctxPtr outBufPtr = pcre2_substitute
-                codePtr
-                (toCUs subjPtr)
-                (fromIntegral subjCUs)
-                0
-                (matchEnvOpts .|. curOpts)
-                nullPtr
-                ctxPtr
-                (toCUs replPtr)
-                (fromIntegral replCUs)
-                outBufPtr
-                outLenPtr
+        -- Prepare first attempt.
+        maybeLogRef <- forM matchEnvSubCallout $ \_ -> liftIO $ newIORef []
+        let logging logRef f info = do
+                r <- f info
+                modifyIORef' logRef (r :)
+                return r
+            matchEnv1 = matchEnv0{
+                matchEnvSubCallout =
+                    logging <$> maybeLogRef <*> matchEnvSubCallout}
 
-            checkAndGetOutput :: CInt -> PCRE2_SPTR -> IO Text
-            checkAndGetOutput 0      _         = return subject
-            checkAndGetOutput result outBufPtr = do
-                check (> 0) result
-                outLen <- peek outLenPtr
-                Text.fromPtr (fromCUs outBufPtr) (fromIntegral outLen)
-
-        (matchEnv1, maybeSubCalloutAndLogRef) <- case matchEnvSubCallout of
-            Nothing -> return (matchEnv0, Nothing)
-            Just f  -> do
-                logRef <- liftIO $ newIORef []
-                let matchEnv1 = matchEnv0{
-                        matchEnvSubCallout = Just $ \info -> do
-                            result <- f info
-                            modifyIORef' logRef (result :)
-                            return result}
-                return (matchEnv1, Just (f, logRef))
-
+        -- Run first attempt and return early if success.
         maybeOut1 <- liftIO $ evalContT $ do
             ctxPtr <- mkMatchCtxPtr matchEnv1 subject
             outBufPtr <- ContT $ allocaArray initOutLen
@@ -790,20 +790,21 @@ subberFromEnvAndRepl matchEnv0@MatchEnv{..} replacement subject = evalContT $ do
                 else liftIO $ Just <$> checkAndGetOutput result1 outBufPtr
         mapM_ stop maybeOut1
 
-        -- The output was bigger than we guessed.  Try again.
+        -- The output was bigger than we guessed.  Prepare second attempt.
         computedOutLen <- liftIO $ fromIntegral <$> peek outLenPtr
-        forM_ maybeSubCalloutAndLogRef $ \(_, logRef) ->
-            -- Prepare the log to be replayed in FIFO order
-            liftIO $ modifyIORef logRef reverse
-        let replay (f, logRef) info = readIORef logRef >>= \case
+        -- Prepare the log to be replayed in FIFO order.
+        forM_ maybeLogRef $ \logRef -> liftIO $ modifyIORef logRef reverse
+        let replaying logRef f info = readIORef logRef >>= \case
                 r : rs -> writeIORef logRef rs >> return r
                 []     -> f info
             matchEnv2 = matchEnv0{
                 -- Do not run regular callouts again.
                 matchEnvCallout = Nothing,
                 -- Do not run any substitution callouts run previously.
-                matchEnvSubCallout = replay <$> maybeSubCalloutAndLogRef}
+                matchEnvSubCallout =
+                    replaying <$> maybeLogRef <*> matchEnvSubCallout}
 
+        -- Run second attempt.
         ctxPtr <- mkMatchCtxPtr matchEnv2 subject
         outBufPtr <- ContT $ allocaArray computedOutLen
         liftIO $ do
@@ -828,7 +829,13 @@ mkMatchCtxPtr MatchEnv{..} subject
         maybe (return nullPtr) (ContT . withForeignPtr) matchEnvCtx
 
     | otherwise = do
-        ctxPtr <- ContT $ bracket acquireCtxPtr pcre2_match_context_free
+        ctxPtr <- ContT $
+            let acquireCtxPtr = case matchEnvCtx of
+                    -- No pre-existing match context, so create one afresh.
+                    Nothing -> pcre2_match_context_create nullPtr
+                    -- Pre-existing match context, so copy it.
+                    Just ctx -> withForeignPtr ctx pcre2_match_context_copy
+            in bracket acquireCtxPtr pcre2_match_context_free
 
         forM_ matchEnvCallout $ \f -> do
             funPtr <- mkFunPtrWithERef $ \eRef -> mkCallout $ \blockPtr _ -> do
@@ -848,13 +855,6 @@ mkMatchCtxPtr MatchEnv{..} subject
                 check (== 0)
 
         return ctxPtr
-
-    where
-    acquireCtxPtr = case matchEnvCtx of
-        -- No pre-existing match context, so create one afresh.
-        Nothing -> pcre2_match_context_create nullPtr
-        -- Pre-existing match context, so copy it.
-        Just ctx -> withForeignPtr ctx pcre2_match_context_copy
 
 -- | Within a callout, marshal the original subject and @pcre2_callout_block@
 -- data to Haskell and present to the user function.
