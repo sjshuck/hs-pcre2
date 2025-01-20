@@ -588,7 +588,7 @@ mkCompileCtxPtr
     :: CUInt                                 -- ^ extra compile options
     -> [Ptr Pcre2_compile_context -> IO ()]  -- ^ updates to the context
     -> Maybe (Int -> IO Bool)                -- ^ user recursion guard function
-    -> ContT Code IO (Ptr Pcre2_compile_context)
+    -> ContT r IO (Ptr Pcre2_compile_context)
 mkCompileCtxPtr 0        []      Nothing  = return nullPtr
 mkCompileCtxPtr xtraOpts ctxUpds recGuard = do
     ctxPtr <- ContT $ bracket
