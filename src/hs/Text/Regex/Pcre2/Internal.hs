@@ -133,8 +133,8 @@ _Identity f (Identity x) = Identity <$> f x
 -- | A @FreeT@-style stream.
 data Stream b m a
     = StreamPure a
-    | StreamYield b (Stream b m a)    -- ^ Yield a value and keep going.
-    | StreamEffect (m (Stream b m a)) -- ^ Have an effect and keep going.
+    | StreamYield b (Stream b m a)     -- ^ Yield a value and keep going.
+    | StreamEffect (m (Stream b m a))  -- ^ Have an effect and keep going.
     deriving (Functor)
 
 instance (Functor m) => Applicative (Stream b m) where
@@ -208,102 +208,102 @@ type Subber = Text -> IO Text
 -- options and pattern items, please see the [C API
 -- documentation](https://pcre.org/current/doc/html/pcre2api.html).
 data Option
-    = NoOptions -- ^ `mempty`
-    | TwoOptions Option Option -- ^ `<>`
+    = NoOptions  -- ^ `mempty`
+    | TwoOptions Option Option  -- ^ `<>`
 
-    | AllowEmptyClass -- ^ Make @[]@ not match anything, rather than counting
+    | AllowEmptyClass  -- ^ Make @[]@ not match anything, rather than counting
     -- the @]@ as the first character of the class.
-    | AltBsux -- ^ Like `AltBsuxLegacy`, except with ECMAScript 6 hex literal
+    | AltBsux  -- ^ Like `AltBsuxLegacy`, except with ECMAScript 6 hex literal
     -- feature for @\\u@.
-    | AltBsuxLegacy -- ^ Behave like ECMAScript 5 for @\\U@, @\\u@, and @\\x@.
+    | AltBsuxLegacy  -- ^ Behave like ECMAScript 5 for @\\U@, @\\u@, and @\\x@.
     -- See 'AltBsux'.
-    | AltCircumflex -- ^ Match a @^@ after a newline at the end of the subject.
+    | AltCircumflex  -- ^ Match a @^@ after a newline at the end of the subject.
     -- Only relevant in multiline mode.
-    | AltVerbNames -- ^ Enable backslash escapes in verb names.  E.g.,
+    | AltVerbNames  -- ^ Enable backslash escapes in verb names.  E.g.,
     -- @(*MARK:L\\(O\\)L)@.
-    | Anchored -- ^ Equivalent to beginning pattern with @^@.
-    | BadEscapeIsLiteral -- ^ Do not throw an error for unrecognized or
+    | Anchored  -- ^ Equivalent to beginning pattern with @^@.
+    | BadEscapeIsLiteral  -- ^ Do not throw an error for unrecognized or
     -- malformed escapes.  /"This is a dangerous option."/
-    | Bsr Bsr -- ^ Override what @\\R@ matches (default given by `defaultBsr`).
-    | Caseless -- ^ Case-insensitive match.  Equivalent to @(?i)@.
-    | DepthLimit Word32 -- ^ Override maximum depth of nested backtracking
+    | Bsr Bsr  -- ^ Override what @\\R@ matches (default given by `defaultBsr`).
+    | Caseless  -- ^ Case-insensitive match.  Equivalent to @(?i)@.
+    | DepthLimit Word32  -- ^ Override maximum depth of nested backtracking
     -- (default given by `defaultDepthLimit`).  Equivalent to
     -- @(*LIMIT_DEPTH=@/number/@)@.
-    | DollarEndOnly -- ^ Don't match @$@ with a newline at the end of the
+    | DollarEndOnly  -- ^ Don't match @$@ with a newline at the end of the
     -- subject.
-    | DotAll -- ^ A dot also matches a (single-character) newline.  Equivalent
+    | DotAll  -- ^ A dot also matches a (single-character) newline.  Equivalent
     -- to @(?s)@.
-    | EndAnchored -- ^ More or less like ending pattern with @$@.
-    | EscapedCrIsLf -- ^ Interpret @\\r@ as @\\n@.
-    | Extended -- ^ In the pattern, ignore whitespace, and enable comments
+    | EndAnchored  -- ^ More or less like ending pattern with @$@.
+    | EscapedCrIsLf  -- ^ Interpret @\\r@ as @\\n@.
+    | Extended  -- ^ In the pattern, ignore whitespace, and enable comments
     -- starting with @#@.  Equivalent to @(?x)@.
-    | ExtendedMore -- ^ Like `Extended` but also ignore spaces and tabs within
+    | ExtendedMore  -- ^ Like `Extended` but also ignore spaces and tabs within
     -- @[]@.
-    | FirstLine -- ^ The match must begin in the first line of the subject.
-    | HeapLimit Word32 -- ^ Override maximum heap memory (in kibibytes) used to
+    | FirstLine  -- ^ The match must begin in the first line of the subject.
+    | HeapLimit Word32  -- ^ Override maximum heap memory (in kibibytes) used to
     -- hold backtracking information (default given by `defaultHeapLimit`).
     -- Equivalent to @(*LIMIT_HEAP=@/number/@)@.
-    | Literal -- ^ Treat the pattern as a literal string.
-    | MatchLimit Word32 -- ^ Override maximum value of the main matching loop's
+    | Literal  -- ^ Treat the pattern as a literal string.
+    | MatchLimit Word32  -- ^ Override maximum value of the main matching loop's
     -- internal counter (default given by `defaultMatchLimit`), as a simple CPU
     -- throttle.  Equivalent to @(*LIMIT_MATCH=@/number/@)@.
-    | MatchLine -- ^ Only match complete lines.  Equivalent to bracketing the
+    | MatchLine  -- ^ Only match complete lines.  Equivalent to bracketing the
     -- pattern with @^(?:@/pattern/@)$@.
-    | MatchUnsetBackRef -- ^ A backreference to an unset capture group matches
+    | MatchUnsetBackRef  -- ^ A backreference to an unset capture group matches
     -- an empty string.
-    | MatchWord -- ^ Only match subjects that have word boundaries at the
+    | MatchWord  -- ^ Only match subjects that have word boundaries at the
     -- beginning and end.  Equivalent to bracketing the pattern with
     -- @\\b(?:@/pattern/@)\\b@.
-    | MaxPatternLength Word64 -- ^ Default is `maxBound`.
-    | Multiline -- ^ @^@ and @$@ mean "beginning\/end of a line" rather than
+    | MaxPatternLength Word64  -- ^ Default is `maxBound`.
+    | Multiline  -- ^ @^@ and @$@ mean "beginning\/end of a line" rather than
     -- "beginning\/end of the subject".  Equivalent to @(?m)@.
-    | NeverBackslashC -- ^ Do not allow the unsafe @\\C@ sequence.
-    | NeverUcp -- ^ Don't count Unicode characters in some character classes
+    | NeverBackslashC  -- ^ Do not allow the unsafe @\\C@ sequence.
+    | NeverUcp  -- ^ Don't count Unicode characters in some character classes
     -- such as @\\d@.  Overrides @(*UCP)@.
-    | Newline Newline -- ^ Override what a newline is (default given by
+    | Newline Newline  -- ^ Override what a newline is (default given by
     -- `defaultNewline`).  Equivalent to @(*CRLF)@ or similar.
-    | NoAutoCapture -- ^ Disable numbered capturing parentheses.
-    | NoAutoPossess -- ^ Turn off some optimizations, possibly resulting in some
-    -- callouts not being called.
-    | NoDotStarAnchor -- ^ Turn off an optimization involving @.*@, possibly
+    | NoAutoCapture  -- ^ Disable numbered capturing parentheses.
+    | NoAutoPossess  -- ^ Turn off some optimizations, possibly resulting in
+    -- some callouts not being called.
+    | NoDotStarAnchor  -- ^ Turn off an optimization involving @.*@, possibly
     -- resulting in some callouts not being called.
-    | NoStartOptimize -- ^ Turn off some optimizations normally performed at the
-    -- beginning of a pattern.
-    | NotBol -- ^ First character of subject is not the __b__eginning __o__f
+    | NoStartOptimize  -- ^ Turn off some optimizations normally performed at
+    -- the beginning of a pattern.
+    | NotBol  -- ^ First character of subject is not the __b__eginning __o__f
     -- __l__ine.  Only affects @^@.
-    | NotEmpty -- ^ The 0th capture doesn't match if it would be empty.
-    | NotEmptyAtStart -- ^ The 0th capture doesn't match if it would be empty
+    | NotEmpty  -- ^ The 0th capture doesn't match if it would be empty.
+    | NotEmptyAtStart  -- ^ The 0th capture doesn't match if it would be empty
     -- and at the beginning of the subject.
-    | NotEol -- ^ End of subject is not the __e__nd __o__f __l__ine.  Only
+    | NotEol  -- ^ End of subject is not the __e__nd __o__f __l__ine.  Only
     -- affects @$@.
-    | OffsetLimit Word64 -- ^ Limit how far an unanchored search can advance in
+    | OffsetLimit Word64  -- ^ Limit how far an unanchored search can advance in
     -- the subject.
-    | ParensLimit Word32 -- ^ Override max depth of nested parentheses (default
+    | ParensLimit Word32  -- ^ Override max depth of nested parentheses (default
     -- given by `defaultParensLimit`).
-    | PartialHard -- ^ If the subject ends without finding a complete match,
+    | PartialHard  -- ^ If the subject ends without finding a complete match,
     -- stop trying alternatives and signal a partial match immediately.
     -- Currently we do this by throwing a `Pcre2Exception` but we should do
     -- better.
-    | PartialSoft -- ^ If the subject ends and all alternatives have been tried,
-    -- but no complete match is found, signal a partial match.  Currently we do
-    -- this by throwing a `Pcre2Exception` but we should do better.
-    | SubGlobal -- ^ /Affects `subOpt`./  Replace all, rather than just the
+    | PartialSoft  -- ^ If the subject ends and all alternatives have been
+    -- tried, but no complete match is found, signal a partial match.  Currently
+    -- we do this by throwing a `Pcre2Exception` but we should do better.
+    | SubGlobal  -- ^ /Affects `subOpt`./  Replace all, rather than just the
     -- first.
-    | SubLiteral -- ^ /Affects `subOpt`./  Treat the replacement as a literal
+    | SubLiteral  -- ^ /Affects `subOpt`./  Treat the replacement as a literal
     -- string.
-    | SubReplacementOnly -- ^ /Affects `subOpt`./  Return just the rendered
+    | SubReplacementOnly  -- ^ /Affects `subOpt`./  Return just the rendered
     -- replacement instead of it within the subject.  With `SubGlobal`, all
     -- results are concatenated.
-    | SubUnknownUnset -- ^ /Affects `subOpt`./  References in the replacement to
-    -- non-existent captures don't error but are treated as unset.
-    | SubUnsetEmpty -- ^ /Affects `subOpt`./  References in the replacement to
+    | SubUnknownUnset  -- ^ /Affects `subOpt`./  References in the replacement
+    -- to non-existent captures don't error but are treated as unset.
+    | SubUnsetEmpty  -- ^ /Affects `subOpt`./  References in the replacement to
     -- unset captures don't error but are treated as empty.
-    | Ucp -- ^ Count Unicode characters in some character classes such as @\\d@.
-    -- Incompatible with `NeverUcp`.
-    | Ungreedy -- ^ Invert the effect of @?@.  Without it, quantifiers are
+    | Ucp  -- ^ Count Unicode characters in some character classes such as
+    -- @\\d@.  Incompatible with `NeverUcp`.
+    | Ungreedy  -- ^ Invert the effect of @?@.  Without it, quantifiers are
     -- non-greedy; with it, they are greedy.  Equivalent to @(?U)@.
 
-    | UnsafeCompileRecGuard (Int -> IO Bool) -- ^ Run the given guard on every
+    | UnsafeCompileRecGuard (Int -> IO Bool)  -- ^ Run the given guard on every
     -- new descent into a level of parentheses, passing the current depth as
     -- argument.  Returning @False@ aborts pattern compilation with an
     -- exception.  Multiples of this option before the rightmost are ignored.
@@ -312,13 +312,13 @@ data Option
     -- /two passes, both times triggering the recursion guard.  Also, it is/
     -- /triggered at the beginning of the pattern, passing 0.  None of this is/
     -- /documented; expect the unexpected in the presence of side effects!/
-    | UnsafeCallout (CalloutInfo -> IO CalloutResult) -- ^ Run the given callout
-    -- at every callout point (see
+    | UnsafeCallout (CalloutInfo -> IO CalloutResult)  -- ^ Run the given
+    -- callout at every callout point (see
     -- [the docs](https://pcre.org/current/doc/html/pcre2callout.html) for more
     -- info).  Multiples of this option before the rightmost are ignored.
-    | AutoCallout -- ^ Run callout for every pattern item.  Only relevant if a
+    | AutoCallout  -- ^ Run callout for every pattern item.  Only relevant if a
     -- callout is set.
-    | UnsafeSubCallout (SubCalloutInfo -> IO SubCalloutResult) -- ^ Run the
+    | UnsafeSubCallout (SubCalloutInfo -> IO SubCalloutResult)  -- ^ Run the
     -- given callout on every substitution.  This is at most once unless
     -- `SubGlobal` is set.  Multiples of this option before the rightmost are
     -- ignored.
@@ -331,8 +331,8 @@ instance Monoid Option where
 
 -- | What @\\R@, __b__ack__s__lash __R__, can mean.
 data Bsr
-    = BsrUnicode -- ^ any Unicode line ending sequence
-    | BsrAnyCrlf -- ^ @\\r@, @\\n@, or @\\r\\n@
+    = BsrUnicode  -- ^ any Unicode line ending sequence
+    | BsrAnyCrlf  -- ^ @\\r@, @\\n@, or @\\r\\n@
     deriving (Eq, Show)
 
 -- | C to Haskell.
@@ -340,7 +340,8 @@ bsrFromC :: CUInt -> Bsr
 bsrFromC x
     | x == pcre2_BSR_UNICODE = BsrUnicode
     | x == pcre2_BSR_ANYCRLF = BsrAnyCrlf
-    | otherwise              = error $ "bsrFromC: bad value " ++ show x
+    | otherwise              = error $
+        "Text.Regex.Pcre2.Internal.bsrFromC: bad value " ++ show x
 
 -- | Haskell to C.
 bsrToC :: Bsr -> CUInt
@@ -349,12 +350,12 @@ bsrToC BsrAnyCrlf = pcre2_BSR_ANYCRLF
 
 -- | What's considered a newline.
 data Newline
-    = NewlineCr      -- ^ @\\r@ only
-    | NewlineLf      -- ^ @\\n@ only
-    | NewlineCrlf    -- ^ @\\r\\n@ only
-    | NewlineAny     -- ^ any Unicode line ending sequence
-    | NewlineAnyCrlf -- ^ any of the above
-    | NewlineNul     -- ^ binary zero
+    = NewlineCr       -- ^ @\\r@ only
+    | NewlineLf       -- ^ @\\n@ only
+    | NewlineCrlf     -- ^ @\\r\\n@ only
+    | NewlineAny      -- ^ any Unicode line ending sequence
+    | NewlineAnyCrlf  -- ^ any of the above
+    | NewlineNul      -- ^ binary zero
     deriving (Eq, Show)
 
 -- | C to Haskell.
@@ -366,7 +367,8 @@ newlineFromC x
     | x == pcre2_NEWLINE_ANY     = NewlineAny
     | x == pcre2_NEWLINE_ANYCRLF = NewlineAnyCrlf
     | x == pcre2_NEWLINE_NUL     = NewlineNul
-    | otherwise                  = error $ "newlineFromC: bad value " ++ show x
+    | otherwise                  = error $
+        "Text.Regex.Pcre2.Internal.newlineFromC: bad value " ++ show x
 
 -- | Haskell to C.
 newlineToC :: Newline -> CUInt
@@ -398,19 +400,19 @@ data CalloutInfo
 
 -- | What caused the callout.
 data CalloutIndex
-    = CalloutNumber Int -- ^ Numerical callout.
-    | CalloutName Text -- ^ String callout.
-    | CalloutAuto Int Int -- ^ The item located at this half-open range of
+    = CalloutNumber Int  -- ^ Numerical callout.
+    | CalloutName Text  -- ^ String callout.
+    | CalloutAuto Int Int  -- ^ The item located at this half-open range of
     -- offsets within the pattern.  See `AutoCallout`.
     deriving (Show, Eq)
 
 -- | Callout functions return one of these values, which dictates what happens
 -- next in the match.
 data CalloutResult
-    = CalloutProceed -- ^ Keep going.
-    | CalloutNoMatchHere -- ^ Fail the current capture, but not the whole match.
-    -- For example, backtracking may occur.
-    | CalloutNoMatch -- ^ Fail the whole match.
+    = CalloutProceed  -- ^ Keep going.
+    | CalloutNoMatchHere  -- ^ Fail the current capture, but not the whole
+    -- match.  For example, backtracking may occur.
+    | CalloutNoMatch  -- ^ Fail the whole match.
     deriving (Show, Eq)
 
 -- | Haskell to C.
@@ -436,10 +438,10 @@ data SubCalloutInfo
 -- | Substitution callout functions return one of these values, which dictates
 -- what happens next in the substitution.
 data SubCalloutResult
-    = SubCalloutAccept -- ^ Succeed, and keep going if in global mode.
-    | SubCalloutSkip -- ^ Do not perform this substitution, but keep going if in
-    -- global mode.
-    | SubCalloutAbort -- ^ Do not perform this or any subsequent substitutions.
+    = SubCalloutAccept  -- ^ Succeed, and keep going if in global mode.
+    | SubCalloutSkip  -- ^ Do not perform this substitution, but keep going if
+    -- in global mode.
+    | SubCalloutAbort  -- ^ Do not perform this or any subsequent substitutions.
     deriving (Show, Eq)
 
 -- | Haskell to C.
@@ -673,7 +675,8 @@ extractMatchEnv matchEnvCode = do
 userMatchEnv :: Option -> Text -> IO MatchEnv
 userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
     (matchEnv, []) -> matchEnv
-    _              -> error "BUG! Options not fully extracted"
+    _              -> error
+        "Text.Regex.Pcre2.Internal.userMatchEnv: options not fully extracted"
     where
     extractAll = extractCode patt >>= extractMatchEnv
 
@@ -1057,10 +1060,10 @@ matchOpt option patt = altOf $ _matchOpt option patt
 -- >>> sub "\\b(\\w+) calling the (\\w+)\\b" "$2 calling the $1" "the pot calling the kettle black"
 -- "the kettle calling the pot black"
 sub
-    :: Text -- ^ pattern
-    -> Text -- ^ replacement
-    -> Text -- ^ subject
-    -> Text -- ^ result
+    :: Text  -- ^ pattern
+    -> Text  -- ^ replacement
+    -> Text  -- ^ subject
+    -> Text  -- ^ result
 sub = subOpt mempty
 
 -- | Perform substitutions globally.
@@ -1278,6 +1281,5 @@ supportsUnicode = getConfigNumeric pcre2_CONFIG_UNICODE == 1
 -- | Version of the built-in C library.  The versioning scheme is that PCRE
 -- legacy is 8.x and PCRE2 is 10.x, so this should be @10.@/something/.
 pcreVersion :: Text
-pcreVersion = case getConfigString pcre2_CONFIG_VERSION of
-    Just v  -> v
-    Nothing -> error "pcreVersion: unable to get string"
+pcreVersion = fromMaybe e $ getConfigString pcre2_CONFIG_VERSION where
+    e = error "Text.Regex.Pcre2.Internal.pcreVersion: unable to get string"
