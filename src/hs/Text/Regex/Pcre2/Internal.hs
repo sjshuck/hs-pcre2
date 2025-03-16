@@ -682,14 +682,14 @@ userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
 
 -- | A `MatchEnv` is sufficient to fully implement a matching function.
 matcherFromEnv :: MatchEnv -> Matcher
-matcherFromEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
-    (subjForeignPtr, subjCUs) <- Text.asForeignPtr subject
-    matchData <- withForeignPtr matchEnvCode $ \codePtr ->
+matcherFromEnv matchEnv@MatchEnv{..} subject = do
+    (subjForeignPtr, subjCUs) <- liftIO $ Text.asForeignPtr subject
+    matchData <- liftIO $ withForeignPtr matchEnvCode $ \codePtr ->
         pcre2_match_data_create_from_pattern codePtr nullPtr >>=
             newForeignPtr pcre2_match_data_finalizer
 
     -- Loop over the subject, emitting match data until stopping.
-    return $ evalContT $ callCC $ \stop -> do
+    evalContT $ callCC $ \stop -> do
         (continue, curOff) <- label 0
 
         result <- liftIO $ evalContT $ do
