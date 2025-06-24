@@ -13,14 +13,14 @@ jobs:
       matrix:
         os: [ubuntu-latest, macOS-latest, windows-latest]
         ghc:
-          - 9.12.1
-          - 9.10.1
+          - 9.12.2
+          - 9.10.2
           - 9.8.4
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
       - uses: haskell-actions/setup@v2
         id: setup-haskell
         with:
@@ -56,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
       - uses: haskell-actions/setup@v2
         with:
           enable-stack: true
