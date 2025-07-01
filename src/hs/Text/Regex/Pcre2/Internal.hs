@@ -15,7 +15,6 @@ import           Control.Monad.Cont
 import           Control.Monad.State.Strict
 import           Data.Either                (partitionEithers)
 import           Data.Foldable              (foldl', toList)
-import           Data.Function              (fix)
 import           Data.Functor.Identity      (Identity(..))
 import           Data.IORef
 import           Data.List.NonEmpty         (NonEmpty(..))
@@ -130,46 +129,41 @@ _Identity f (Identity x) = Identity <$> f x
 
 -- ** Streaming support
 
--- | A @FreeT@-style stream.
-data Stream b m a
+-- | A @FreeT@-style stream based on the `IO` monad.
+data Stream b a
     = StreamPure a
-    | StreamYield b (Stream b m a)     -- ^ Yield a value and keep going.
-    | StreamEffect (m (Stream b m a))  -- ^ Have an effect and keep going.
+    | StreamYield !b (Stream b a)     -- ^ Yield a value and keep going.
+    | StreamEffect (IO (Stream b a))  -- ^ Have an effect and keep going.
     deriving (Functor)
 
-instance (Functor m) => Applicative (Stream b m) where
+instance Applicative (Stream b) where
     pure = StreamPure
-    StreamPure f     <*> sx = f <$> sx
-    StreamYield y sf <*> sx = StreamYield y $ sf <*> sx
-    StreamEffect msf <*> sx = StreamEffect $ msf <&> (<*> sx)
+    (<*>) = ap
 
-instance (Functor m) => Monad (Stream b m) where
+instance Monad (Stream b) where
     StreamPure x     >>= f = f x
     StreamYield y sx >>= f = StreamYield y $ sx >>= f
     StreamEffect msx >>= f = StreamEffect $ msx <&> (>>= f)
 
-instance MonadTrans (Stream b) where
-    lift = StreamEffect . fmap StreamPure
+instance MonadIO (Stream b) where
+    liftIO = StreamEffect . fmap StreamPure
 
-instance (MonadIO m) => MonadIO (Stream b m) where
-    liftIO = lift . liftIO
-
-streamYield :: b -> Stream b m ()
+streamYield :: b -> Stream b ()
 streamYield y = StreamYield y $ StreamPure ()
 
 -- | Effectfully transform yielded values.
-streamMap :: (Functor m) => (b -> m c) -> Stream b m a -> Stream c m a
-streamMap f = fix $ \go -> \case
-    StreamPure x     -> StreamPure x
-    StreamYield y sx -> StreamEffect $ f y <&> \y' -> StreamYield y' $ go sx
-    StreamEffect ms  -> StreamEffect $ go <$> ms
+streamMap :: (b -> IO c) -> Stream b a -> Stream c a
+streamMap f = go where
+    go (StreamPure x)     = StreamPure x
+    go (StreamYield y sx) = StreamEffect $ f y <&> \y' -> StreamYield y' $ go sx
+    go (StreamEffect ms)  = StreamEffect $ go <$> ms
 
 -- | Unsafely tear down a `Stream` into a lazy, pure list of values yielded.
-unsafeStreamToLazyList :: Stream b IO a -> [b]
-unsafeStreamToLazyList = fix $ \continue -> \case
+unsafeStreamToLazyList :: Stream b a -> [b]
+unsafeStreamToLazyList = \case
     StreamPure _    -> []
-    StreamYield y s -> y : continue s
-    StreamEffect ms -> continue $ unsafePerformIO ms
+    StreamYield y s -> y : unsafeStreamToLazyList s
+    StreamEffect ms -> unsafeStreamToLazyList $ unsafePerformIO ms
 
 -- * Assembling inputs into @Matcher@s and @Subber@s
 
@@ -181,7 +175,7 @@ unsafeStreamToLazyList = fix $ \continue -> \case
 -- match; they represent the states of the C data at moments in time, and are
 -- intended to be composed with another streaming transformation before being
 -- subjected to teardown and `unsafePerformIO`.
-type Matcher = Text -> Stream MatchData IO ()
+type Matcher = Text -> Stream MatchData ()
 
 -- | A substitution function.
 type Subber = Text -> IO Text
@@ -682,14 +676,14 @@ userMatchEnv option patt = runStateT extractAll (applyOption option) <&> \case
 
 -- | A `MatchEnv` is sufficient to fully implement a matching function.
 matcherFromEnv :: MatchEnv -> Matcher
-matcherFromEnv matchEnv@MatchEnv{..} subject = StreamEffect $ do
-    (subjForeignPtr, subjCUs) <- Text.asForeignPtr subject
-    matchData <- withForeignPtr matchEnvCode $ \codePtr ->
+matcherFromEnv matchEnv@MatchEnv{..} subject = do
+    (subjForeignPtr, subjCUs) <- liftIO $ Text.asForeignPtr subject
+    matchData <- liftIO $ withForeignPtr matchEnvCode $ \codePtr ->
         pcre2_match_data_create_from_pattern codePtr nullPtr >>=
             newForeignPtr pcre2_match_data_finalizer
 
     -- Loop over the subject, emitting match data until stopping.
-    return $ evalContT $ callCC $ \stop -> do
+    evalContT $ callCC $ \stop -> do
         (continue, curOff) <- label 0
 
         result <- liftIO $ evalContT $ do
