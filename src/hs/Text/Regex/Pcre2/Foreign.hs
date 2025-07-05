@@ -58,6 +58,9 @@ foreign import capi safe "pcre2.h" pcre2_general_context_free
     :: Ptr Pcre2_general_context
     -> IO ()
 
+foreign import capi safe "pcre2.h &pcre2_general_context_free_8"
+    pcre2_general_context_finalizer :: FinalizerPtr Pcre2_general_context
+
 -- * The compile context
 
 foreign import capi safe "pcre2.h" pcre2_compile_context_create
@@ -71,6 +74,9 @@ foreign import capi safe "pcre2.h" pcre2_compile_context_copy
 foreign import capi safe "pcre2.h" pcre2_compile_context_free
     :: Ptr Pcre2_compile_context
     -> IO ()
+
+foreign import capi safe "pcre2.h &pcre2_compile_context_free_8"
+    pcre2_compile_context_finalizer :: FinalizerPtr Pcre2_compile_context
 
 -- ** Compile context setters
 
@@ -136,6 +142,9 @@ foreign import capi safe "pcre2.h" pcre2_match_context_copy
 foreign import capi safe "pcre2.h" pcre2_match_context_free
     :: Ptr Pcre2_match_context
     -> IO ()
+
+foreign import capi safe "pcre2.h &pcre2_match_context_free_8"
+    pcre2_match_context_finalizer :: FinalizerPtr Pcre2_match_context
 
 -- ** Match context setters
 
@@ -214,6 +223,9 @@ constant ''PCRE2_SIZE "ZERO_TERMINATED"
 foreign import capi safe "pcre2.h" pcre2_code_free
     :: Ptr Pcre2_code
     -> IO ()
+
+foreign import capi safe "pcre2.h &pcre2_code_free_8"
+    pcre2_code_finalizer :: FinalizerPtr Pcre2_code
 
 foreign import capi safe "pcre2.h" pcre2_code_copy
     :: Ptr Pcre2_code
@@ -434,6 +446,9 @@ foreign import capi safe "pcre2.h" pcre2_match_data_create_from_pattern
 foreign import capi safe "pcre2.h" pcre2_match_data_free
     :: Ptr Pcre2_match_data
     -> IO ()
+
+foreign import capi safe "pcre2.h &pcre2_match_data_free_8"
+    pcre2_match_data_finalizer :: FinalizerPtr Pcre2_match_data
 
 -- * Matching a pattern
 

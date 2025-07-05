@@ -1,4 +1,3 @@
-{-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE LambdaCase #-}
@@ -68,15 +67,6 @@ mkFunPtrWithERef mkFunPtr = ContT $ \continue -> do
     eRef <- newIORef Nothing
     let rethrow = readIORef eRef >>= mapM_ throwIO
     bracket (mkFunPtr eRef) freeHaskellFunPtr continue <* rethrow
-
--- These are unsafe imports and should not be exported if
--- pcre2_general_context_create is also part of the API.
-foreign import capi unsafe "pcre2.h &pcre2_code_free_8"
-    pcre2_code_finalizer :: FinalizerPtr Pcre2_code
-foreign import capi unsafe "pcre2.h &pcre2_match_context_free_8"
-    pcre2_match_context_finalizer :: FinalizerPtr Pcre2_match_context
-foreign import capi unsafe "pcre2.h &pcre2_match_data_free_8"
-    pcre2_match_data_finalizer :: FinalizerPtr Pcre2_match_data
 
 -- ** Fast `Text` slicing
 
