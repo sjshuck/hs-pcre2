@@ -157,7 +157,7 @@ predictCapturesInfoQ = runIO . predictCapturesInfo mempty . Text.pack
 -- if needed.
 capturesInfoQ :: String -> Q (Maybe Type)
 capturesInfoQ s = predictCapturesInfoQ s >>= \case
-    -- No parenthesized captures, so need for Captures, so no info.
+    -- No parenthesized captures, so no need for Captures, so no info.
     (0, _) -> return Nothing
 
     -- One or more parenthesized captures.  Produce
@@ -212,6 +212,16 @@ mkQuoteExp matchE capturesE s = regexQ `appE` textQ s where
         Nothing   -> matchE
         Just info -> capturesE `appTypeE` return info
 
+-- | A default quasi-quoter.
+zeroQQ :: QuasiQuoter
+zeroQQ = QuasiQuoter{
+    quoteExp  = cannotProduce "an expression",
+    quotePat  = cannotProduce "a pattern",
+    quoteType = cannotProduce "a type",
+    quoteDec  = cannotProduce "declarations"}
+    where
+    cannotProduce what _ = fail $ "Cannot produce " ++ what
+
 -- | === As an expression
 --
 -- @
@@ -252,7 +262,7 @@ mkQuoteExp matchE capturesE s = regexQ `appE` textQ s where
 --
 -- If there are no named captures, this simply acts as a guard.
 regex :: QuasiQuoter
-regex = QuasiQuoter{
+regex = zeroQQ{
     quoteExp = mkQuoteExp [e| matchTH |] [e| capturesTH |],
 
     quotePat = \s -> predictCapturesInfoQ s >>= \info -> case snd info of
@@ -261,10 +271,7 @@ regex = QuasiQuoter{
             (names, numbers) = unzip lookupTable
             e = [e| capturesNumberedTH $(textQ s) $(liftData numbers) |]
             p = foldr f wildP names
-            f name r = conP '(:) [varP $ mkName $ Text.unpack name, r],
-
-    quoteType = \_ -> fail "regex: cannot produce a type",
-    quoteDec  = \_ -> fail "regex: cannot produce declarations"}
+            f name r = conP '(:) [varP $ mkName $ Text.unpack name, r]}
 
 -- | An optical variant of `regex`\/a type-annotated variant of `_captures`. Can
 -- only be used as an expression.
@@ -282,9 +289,4 @@ regex = QuasiQuoter{
 -- >
 -- > -- There are 15 competing standards
 _regex :: QuasiQuoter
-_regex = QuasiQuoter{
-    quoteExp = mkQuoteExp [e| _matchTH |] [e| _capturesTH |],
-
-    quotePat  = \_ -> fail "_regex: cannot produce a pattern",
-    quoteType = \_ -> fail "_regex: cannot produce a type",
-    quoteDec  = \_ -> fail "_regex: cannot produce declarations"}
+_regex = zeroQQ{quoteExp = mkQuoteExp [e| _matchTH |] [e| _capturesTH |]}
