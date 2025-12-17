@@ -1234,9 +1234,17 @@ supportsJit = getConfigNumeric pcre2_CONFIG_JIT == 1
 jitTarget :: Maybe Text
 jitTarget = getConfigString pcre2_CONFIG_JITTARGET
 
--- | Number of bytes used for internal linkage in compiled regexes.
+-- | Number of bytes PCRE2 was instructed to use for internal linkage in
+-- compiled regexes.
 linkSize :: Int
 linkSize = fromIntegral $ getConfigNumeric pcre2_CONFIG_LINKSIZE
+
+-- | Number of bytes actually used for internal linkage in compiled regexes.
+--
+-- @since 2.2.3
+effectivelinkSize :: Int
+effectivelinkSize =
+    fromIntegral $ getConfigNumeric pcre2_CONFIG_EFFECTIVE_LINKSIZE
 
 -- | See `MatchLimit`.
 defaultMatchLimit :: Int
