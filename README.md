@@ -60,15 +60,18 @@ forMOf kv'd file $ execStateT $ do
   callbacks to run during matching!
 * Zero-copying of substrings where beneficial.
 * Few dependencies.
-* Bundled, statically-linked build of up-to-date PCRE2 (version 10.44), with a
+* Bundled, statically-linked build of up-to-date PCRE2 (version 10.47), with a
   complete, exposed Haskell binding.
 
 ## Performance
-Currently we are slower than other libraries.  For example:
+Currently we are slower than other libraries.  The difference is less pronounced
+for `Text` where no conversions are necessary to use this library.
 
-| Operation                 | `pcre2`   | `pcre-light` | `regex-pcre-builtin` |
-| :--                       |       --: |          --: |                  --: |
-| Compile and match a regex | 3.9 &mu;s |    1.2 &mu;s |            2.9 &mu;s |
+| Operation                   | `pcre2`    | `regex-pcre-builtin` | `pcre-light` |
+| :--                         |        --: |                  --: |          --: |
+| Matching a `String`         | 1.22 &mu;s |           0.34 &mu;s |   0.23 &mu;s |
+| Matching a `Text` (shorter) | 1.22 &mu;s |           0.93 &mu;s |   0.29 &mu;s |
+| Matching a `Text` (longer)  | 1.89 &mu;s |           1.52 &mu;s |  11.12 &mu;s |
 
 If it's really regex processing that's causing a bottleneck,
 [pcre-light](https://hackage.haskell.org/package/pcre-light)/[-heavy](https://hackage.haskell.org/package/pcre-heavy)/[lens-regex-pcre](https://hackage.haskell.org/package/lens-regex-pcre)
@@ -77,8 +80,9 @@ are recommended instead of this library for the very best performance.
 ## Wishlist
 * Many performance optimizations.
 * Make use of DFA matching for lazy (infinite) inputs.  This likely requires
-  some upstream changes as well but in theory it's possible
-* Improve compile time. Support external `libpcre2` maybe
+  some upstream changes as well but in theory it's possible.
+* Improve compile time.
+  * Support external `libpcre2` maybe.
 
 ## License
 [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0.html).
