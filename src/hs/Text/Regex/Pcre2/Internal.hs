@@ -220,6 +220,8 @@ data Option
     | Dupnames -- ^ Disable the duplicate name constraint, allowing multiple
     -- capture group names within a pattern to be identical. Equivalent to
     -- @(?J)@.
+    --
+    -- @since 2.2.3
     | EndAnchored  -- ^ More or less like ending pattern with @$@.
     | EscapedCrIsLf  -- ^ Interpret @\\r@ as @\\n@.
     | Extended  -- ^ In the pattern, ignore whitespace, and enable comments
