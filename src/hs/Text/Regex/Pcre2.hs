@@ -226,9 +226,11 @@ module Text.Regex.Pcre2 (
     _regex,
 
     -- ** Type-indexed capture groups
-    Captures(),
+    Captures,
+    CapturesInfo,
     capture,
     _capture,
+    getRegexInfo,
 
     -- * Options
 

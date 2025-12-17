@@ -13,7 +13,7 @@
 module Text.Regex.Pcre2.TH where
 
 import           Control.Applicative        (Alternative(..))
-import           Control.Monad              (forM)
+import           Control.Monad              ((>=>), forM)
 import           Control.Monad.State.Strict (evalStateT)
 import           Data.IORef
 import           Data.List                  (sortBy)
@@ -44,9 +44,7 @@ import           Text.Regex.Pcre2.Internal
 -- information about the number and names of those captures.
 --
 -- This type is only intended to be created by `regex`\/`_regex` and consumed by
--- `capture`\/`_capture`, relying on type inference.  Specifying the @info@
--- explicitly in a type signature is not supported&#x2014;the definition of
--- `CapturesInfo` is not part of the public API and may change.
+-- `capture`\/`_capture`, relying on type inference.
 --
 -- After obtaining `Captures` it's recommended to immediately consume them and
 -- transform them into application-level data, to avoid leaking the types.
@@ -56,6 +54,8 @@ newtype Captures (info :: CapturesInfo) = Captures (NonEmpty Text)
 -- | The kind of `Captures`'s @info@.  The first number is the total number of
 -- parenthesized captures, and the list is a lookup table from capture names to
 -- numbers.
+--
+-- @since 2.2.3
 type CapturesInfo = (Nat, [(Symbol, Nat)])
 
 -- | Look up the number of a capture at compile time, either by number or by
@@ -97,8 +97,17 @@ capture = view $ _capture @i
 -- | Like `capture` but focus from a `Captures` to a capture.
 _capture :: forall i info num. (CaptNum i info ~ num, KnownNat num) =>
     Lens' (Captures info) Text
-_capture = _Captures . singular (ix $ fromInteger $ natVal @num Proxy) where
-    _Captures f (Captures cs) = Captures <$> f cs
+_capture = _Captures . singular (ix $ fromInteger $ natVal @num Proxy)
+
+_Captures :: Lens' (Captures info) (NonEmpty Text)
+_Captures f (Captures cs) = Captures <$> f cs
+
+-- | Extract the underlying captures from a Template Haskell-generated
+-- @Captures@.  This loses type-level information.
+--
+-- @since 2.2.3
+getCaptures :: Captures info -> NonEmpty Text
+getCaptures = view _Captures
 
 -- | Unexported, top-level `IORef` that's created upon the first runtime
 -- evaluation of a Template Haskell `Matcher`.
@@ -117,9 +126,23 @@ memoMatcher patt = unsafePerformIO $ do
             in (Map.insert patt matcher cache, matcher)
 
 -- | From options and pattern, determine number of parenthesized captures, along
--- with a list of their names (each indexed and in index order).
-predictCapturesInfo :: Option -> Text -> IO (Int, [(Text, Int)])
-predictCapturesInfo option patt = do
+-- with a list of their names (each indexed and in index order).  This may be
+-- used to validate that a pattern not known at compile time has certain
+-- required named captures, and construct a safe way of indexing them, for
+-- example.
+--
+-- >>> getRegexInfo mempty "foo (?<bar>...) (?<a>[[:alpha:]]) (ba*z)"
+-- (3,[("bar" 1),("a",2)])
+--
+-- It is in @IO@ in order to facilitate catching `Pcre2CompileException`s.  Note
+-- that the resultant regex is discarded, as are any @Option@s that only have
+-- effect at match time.
+--
+-- Used internally to produce `CapturesInfo`.
+--
+-- @since 2.2.3
+getRegexInfo :: Option -> Text -> IO (Int, [(Text, Int)])
+getRegexInfo option patt = do
     code <- evalStateT (extractCode patt) (applyOption option)
 
     withForeignPtr code $ \codePtr -> do
@@ -150,13 +173,13 @@ getCodeInfo codePtr what = alloca $ \wherePtr -> do
     peek wherePtr
 
 -- | Predict info about parenthesized captures of a pattern at splice time.
-predictCapturesInfoQ :: String -> Q (Int, [(Text, Int)])
-predictCapturesInfoQ = runIO . predictCapturesInfo mempty . Text.pack
+regexInfoQ :: String -> Q (Int, [(Text, Int)])
+regexInfoQ = runIO . getRegexInfo mempty . Text.pack
 
 -- | Generate the data-kinded phantom type parameter of `Captures` of a pattern,
 -- if needed.
 capturesInfoQ :: String -> Q (Maybe Type)
-capturesInfoQ s = predictCapturesInfoQ s >>= \case
+capturesInfoQ = regexInfoQ >=> \case
     -- No parenthesized captures, so no need for Captures, so no info.
     (0, _) -> return Nothing
 
@@ -265,7 +288,7 @@ regex :: QuasiQuoter
 regex = zeroQQ{
     quoteExp = mkQuoteExp [e| matchTH |] [e| capturesTH |],
 
-    quotePat = \s -> predictCapturesInfoQ s >>= \info -> case snd info of
+    quotePat = \s -> regexInfoQ s >>= \info -> case snd info of
         []          -> viewP [e| matchesTH $(textQ s) |] [p| True |]
         lookupTable -> viewP e p where
             (names, numbers) = unzip lookupTable
