@@ -367,22 +367,22 @@ newlineToC NewlineAnyCrlf = pcre2_NEWLINE_ANYCRLF
 newlineToC NewlineNul     = pcre2_NEWLINE_NUL
 
 -- | Input for user-defined callouts.
-data CalloutInfo
-    = CalloutInfo{
-        -- | The index of which callout point we're on.
-        calloutIndex :: CalloutIndex,
-        -- | The captures that have been set so far.
-        calloutCaptures :: NonEmpty (Maybe Text),
-        -- | The original subject.
-        calloutSubject :: Text,
-        -- | The name of the most recently passed @(*MARK)@, @(*PRUNE)@, or
-        -- @(*THEN)@, if any.
-        calloutMark :: Maybe Text,
-        -- | Is this the first callout after the start of matching?
-        calloutIsFirst :: Bool,
-        -- | Has a backtrack occurred since the previous callout, or the
-        -- beginning of matching if no previous callouts?
-        calloutBacktracked :: Bool}
+data CalloutInfo = CalloutInfo{
+    -- | The index of which callout point we're on.
+    calloutIndex :: CalloutIndex,
+    -- | The captures that have been set so far.
+    calloutCaptures :: NonEmpty (Maybe Text),
+    -- | The original subject.
+    calloutSubject :: Text,
+    -- | The name of the most recently passed @(*MARK)@, @(*PRUNE)@, or
+    -- @(*THEN)@, if any.
+    calloutMark :: Maybe Text,
+    -- | Is this the first callout after the start of matching?
+    calloutIsFirst :: Bool,
+    -- | Has a backtrack occurred since the previous callout, or the beginning
+    -- of matching if no previous callouts?
+    calloutBacktracked :: Bool}
+
     deriving (Show, Eq)
 
 -- | What caused the callout.
@@ -409,17 +409,17 @@ calloutResultToC CalloutNoMatchHere = 1
 calloutResultToC CalloutNoMatch     = pcre2_ERROR_NOMATCH
 
 -- | Input for user-defined substitution callouts.
-data SubCalloutInfo
-    = SubCalloutInfo{
-        -- | The 1-based index of which substitution we're on.  Only goes past 1
-        -- during global substitutions.
-        subCalloutSubsCount :: Int,
-        -- | The captures that have been set so far.
-        subCalloutCaptures :: NonEmpty (Maybe Text),
-        -- | The original subject.
-        subCalloutSubject :: Text,
-        -- | The replacement.
-        subCalloutReplacement :: Text}
+data SubCalloutInfo = SubCalloutInfo{
+    -- | The 1-based index of which substitution we're on.  Only goes past 1
+    -- during global substitutions.
+    subCalloutSubsCount :: Int,
+    -- | The captures that have been set so far.
+    subCalloutCaptures :: NonEmpty (Maybe Text),
+    -- | The original subject.
+    subCalloutSubject :: Text,
+    -- | The replacement.
+    subCalloutReplacement :: Text}
+
     deriving (Show, Eq)
 
 -- | Substitution callout functions return one of these values, which dictates
