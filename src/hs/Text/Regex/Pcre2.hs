@@ -299,6 +299,7 @@ module Text.Regex.Pcre2 (
     supportsJit,
     jitTarget,
     linkSize,
+    effectivelinkSize,
     defaultMatchLimit,
     defaultNewline,
     defaultIsNeverBackslashC,
