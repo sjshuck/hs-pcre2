@@ -192,6 +192,7 @@ foreign import capi unsafe "pcre2.h" pcre2_config
 constant ''CUInt "CONFIG_BSR"
 constant ''CUInt "CONFIG_COMPILED_WIDTHS"
 constant ''CUInt "CONFIG_DEPTHLIMIT"
+constant ''CUInt "CONFIG_EFFECTIVE_LINKSIZE"  -- ^ @since 2.2.3
 constant ''CUInt "CONFIG_HEAPLIMIT"
 constant ''CUInt "CONFIG_JIT"
 constant ''CUInt "CONFIG_JITTARGET"
@@ -648,6 +649,13 @@ foreign import capi unsafe "pcre2.h" pcre2_get_error_message
     :: CInt
     -> Ptr PCRE2_UCHAR
     -> PCRE2_SIZE
+    -> IO CInt
+
+-- * Iterating over all matches
+foreign import capi safe "pcre2.h" pcre2_next_match
+    :: Ptr Pcre2_match_data
+    -> Ptr PCRE2_SIZE
+    -> Ptr CUInt
     -> IO CInt
 
 -- * Pattern serialization

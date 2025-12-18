@@ -12,6 +12,9 @@
 -- the [C API docs](https://pcre.org/current/doc/html/pcre2callout.html)
 -- for more information.
 module Text.Regex.Pcre2.Unsafe (
+    -- ** Un-refining @Captures@
+    getCaptures,
+
     -- ** Options
     Option(
         AutoCallout,
@@ -29,3 +32,4 @@ module Text.Regex.Pcre2.Unsafe (
 where
 
 import Text.Regex.Pcre2.Internal
+import Text.Regex.Pcre2.TH

@@ -1,5 +1,16 @@
 # Changelog and Acknowledgements
 
+## 2.2.3
+* Exposed `CapturesInfo` kind of type-level regex info.
+* Exposed `predictCapturesInfo` for producing value-level of same, implementing
+  [#45](https://github.com/sjshuck/hs-pcre2/issues/45).
+* Added `Dupnames` option.  Thanks sbsynopsys!
+* Updated PCRE2 to 10.47.
+  * Added `pcre2_next_match`.
+  * Added `pcre2_CONFIG_EFFECTIVE_LINKSIZE` and `effectivelinkSize`.
+* Added `Text.Regex.Pcre2.Unsafe.getCaptures` to unwrap a `Captures` into a
+  `NonEmpty` list.
+
 ## 2.2.2
 * Fixed [#34](https://github.com/sjshuck/hs-pcre2/issues/34),
   [#35](https://github.com/sjshuck/hs-pcre2/issues/35), and

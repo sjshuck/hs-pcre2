@@ -226,9 +226,11 @@ module Text.Regex.Pcre2 (
     _regex,
 
     -- ** Type-indexed capture groups
-    Captures(),
+    Captures,
+    CapturesInfo,
     capture,
     _capture,
+    predictCapturesInfo,
 
     -- * Options
 
@@ -297,6 +299,7 @@ module Text.Regex.Pcre2 (
     supportsJit,
     jitTarget,
     linkSize,
+    effectivelinkSize,
     defaultMatchLimit,
     defaultNewline,
     defaultIsNeverBackslashC,

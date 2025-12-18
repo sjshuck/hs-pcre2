@@ -204,9 +204,20 @@ main = hspec $ do
             result `shouldBe` "There are 15 competing standards"
 
     describe "Captures" $ do
-        it "have a predictable Show instance" $ do
-            cs <- [regex|a(b)(?<c>c)|] "abc"
+        let mkCaptures = [regex|a(b)(?<c>c)|] "abc"
+
+        it "has a predictable Show instance" $ do
+            cs <- mkCaptures
             show cs `shouldBe` "Captures (\"abc\" :| [\"b\",\"c\"])"
+
+        it "can have its underlying list extracted" $ do
+            cs <- mkCaptures
+            getCaptures cs `shouldBe` "abc" :| ["b", "c"]
+
+    describe "predictCapturesInfo" $ do
+        it ("analyzes captures groups' names" `issue` 45) $ do
+            predictCapturesInfo mempty "foo (?<bar>...) (?<a>[[:alpha:]]) (ba*z)"
+                `shouldReturn` (3, [("bar", 1), ("a", 2)])
 
     describe "an unset capture" $ do
         it "is treated as empty" $ do

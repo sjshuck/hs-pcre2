@@ -1,5 +1,5 @@
 name:                pcre2
-version:             2.2.2
+version:             2.2.3
 github:              "sjshuck/hs-pcre2"
 license:             Apache-2.0
 license-file:        LICENSE # [LICENSE, src/c/pcre2/LICENCE] doesn't work with stack sdist
@@ -40,6 +40,7 @@ library:
   - src/c/pcre2/src/pcre2_chkdint.c
   - src/c/pcre2_chartables.c
   - src/c/pcre2/src/pcre2_compile.c
+  - src/c/pcre2/src/pcre2_compile_cgroup.c
   - src/c/pcre2/src/pcre2_compile_class.c
   - src/c/pcre2/src/pcre2_config.c
   - src/c/pcre2/src/pcre2_context.c
@@ -52,6 +53,7 @@ library:
   - src/c/pcre2/src/pcre2_maketables.c
   - src/c/pcre2/src/pcre2_match.c
   - src/c/pcre2/src/pcre2_match_data.c
+  - src/c/pcre2/src/pcre2_match_next.c
   - src/c/pcre2/src/pcre2_newline.c
   - src/c/pcre2/src/pcre2_ord2utf.c
   - src/c/pcre2/src/pcre2_pattern_info.c
@@ -70,7 +72,6 @@ library:
   - -optc=-DPCRE2_CODE_UNIT_WIDTH=8
   - -optc=-DPCRE2_STATIC=1
   - -optc=-DSUPPORT_PCRE2_8
-  - -optc=-Wno-discarded-qualifiers
   - -optc=-Wno-incompatible-pointer-types
   cc-options:
   - -DHAVE_CONFIG_H
@@ -87,6 +88,14 @@ library:
   - Text.Regex.Pcre2
   - Text.Regex.Pcre2.Foreign
   - Text.Regex.Pcre2.Unsafe
+  when:
+  - condition: os(darwin)
+    then:
+      ghc-options:
+      - -optc=-Wno-ignored-qualifiers
+    else:
+      ghc-options:
+      - -optc=-Wno-discarded-qualifiers
 
 tests:
   pcre2-test:
