@@ -230,7 +230,7 @@ module Text.Regex.Pcre2 (
     CapturesInfo,
     capture,
     _capture,
-    getRegexInfo,
+    predictCapturesInfo,
 
     -- * Options
 

@@ -214,9 +214,9 @@ main = hspec $ do
             cs <- mkCaptures
             getCaptures cs `shouldBe` "abc" :| ["b", "c"]
 
-    describe "getRegexInfo" $ do
+    describe "predictCapturesInfo" $ do
         it ("analyzes captures groups' names" `issue` 45) $ do
-            getRegexInfo mempty "foo (?<bar>...) (?<a>[[:alpha:]]) (ba*z)"
+            predictCapturesInfo mempty "foo (?<bar>...) (?<a>[[:alpha:]]) (ba*z)"
                 `shouldReturn` (3, [("bar", 1), ("a", 2)])
 
     describe "an unset capture" $ do

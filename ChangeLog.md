@@ -2,7 +2,8 @@
 
 ## 2.2.3
 * Exposed `CapturesInfo` kind of type-level regex info.
-* Exposed `getRegexInfo` for producing value-level of same, implementing [#45](https://github.com/sjshuck/hs-pcre2/issues/45).
+* Exposed `predictCapturesInfo` for producing value-level of same, implementing
+  [#45](https://github.com/sjshuck/hs-pcre2/issues/45).
 * Added `Dupnames` option.  Thanks sbsynopsys!
 * Updated PCRE2 to 10.47.
   * Added `pcre2_next_match`.

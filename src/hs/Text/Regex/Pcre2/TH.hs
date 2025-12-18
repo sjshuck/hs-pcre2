@@ -13,7 +13,7 @@
 module Text.Regex.Pcre2.TH where
 
 import           Control.Applicative        (Alternative(..))
-import           Control.Monad              ((>=>), forM)
+import           Control.Monad              (forM)
 import           Control.Monad.State.Strict (evalStateT)
 import           Data.IORef
 import           Data.List                  (sortBy)
@@ -131,7 +131,7 @@ memoMatcher patt = unsafePerformIO $ do
 -- required named captures, and construct a safe way of indexing them, for
 -- example.
 --
--- >>> getRegexInfo mempty "foo (?<bar>...) (?<a>[[:alpha:]]) (ba*z)"
+-- >>> predictCapturesInfo mempty "foo (?<bar>...) (?<a>[[:alpha:]]) (ba*z)"
 -- (3,[("bar" 1),("a",2)])
 --
 -- It is in @IO@ in order to facilitate catching `Pcre2CompileException`s.  Note
@@ -141,8 +141,8 @@ memoMatcher patt = unsafePerformIO $ do
 -- Used internally to produce `CapturesInfo`.
 --
 -- @since 2.2.3
-getRegexInfo :: Option -> Text -> IO (Int, [(Text, Int)])
-getRegexInfo option patt = do
+predictCapturesInfo :: Option -> Text -> IO (Int, [(Text, Int)])
+predictCapturesInfo option patt = do
     code <- evalStateT (extractCode patt) (applyOption option)
 
     withForeignPtr code $ \codePtr -> do
@@ -173,13 +173,13 @@ getCodeInfo codePtr what = alloca $ \wherePtr -> do
     peek wherePtr
 
 -- | Predict info about parenthesized captures of a pattern at splice time.
-regexInfoQ :: String -> Q (Int, [(Text, Int)])
-regexInfoQ = runIO . getRegexInfo mempty . Text.pack
+predictCapturesInfoQ :: String -> Q (Int, [(Text, Int)])
+predictCapturesInfoQ = runIO . predictCapturesInfo mempty . Text.pack
 
 -- | Generate the data-kinded phantom type parameter of `Captures` of a pattern,
 -- if needed.
 capturesInfoQ :: String -> Q (Maybe Type)
-capturesInfoQ = regexInfoQ >=> \case
+capturesInfoQ s = predictCapturesInfoQ s >>= \case
     -- No parenthesized captures, so no need for Captures, so no info.
     (0, _) -> return Nothing
 
@@ -288,7 +288,7 @@ regex :: QuasiQuoter
 regex = zeroQQ{
     quoteExp = mkQuoteExp [e| matchTH |] [e| capturesTH |],
 
-    quotePat = \s -> regexInfoQ s >>= \info -> case snd info of
+    quotePat = \s -> predictCapturesInfoQ s >>= \info -> case snd info of
         []          -> viewP [e| matchesTH $(textQ s) |] [p| True |]
         lookupTable -> viewP e p where
             (names, numbers) = unzip lookupTable
