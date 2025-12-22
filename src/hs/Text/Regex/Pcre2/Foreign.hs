@@ -1,4 +1,5 @@
 {-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 -- | A complete binding to the low-level C API.
@@ -38,7 +39,9 @@ data Pcre2_match_context
 data Pcre2_callout_block
 data Pcre2_substitute_callout_block
 data Pcre2_code
+#ifdef SUPPORT_JIT
 data Pcre2_jit_stack
+#endif
 data Pcre2_match_data
 data Pcre2_callout_enumerate_block
 
@@ -276,6 +279,7 @@ constant ''CUInt "EXTRA_ESCAPED_CR_IS_LF"
 constant ''CUInt "EXTRA_MATCH_LINE"
 constant ''CUInt "EXTRA_MATCH_WORD"
 
+#ifdef SUPPORT_JIT
 -- * JIT compilation
 
 foreign import capi safe "pcre2.h" pcre2_jit_compile
@@ -319,6 +323,7 @@ foreign import capi unsafe "pcre2.h" pcre2_jit_stack_assign
 foreign import capi safe "pcre2.h" pcre2_jit_stack_free
     :: Ptr Pcre2_jit_stack
     -> IO ()
+#endif
 
 -- * Locale support
 
@@ -354,7 +359,9 @@ constant ''CUInt "INFO_HASBACKSLASHC"
 constant ''CUInt "INFO_HASCRORLF"
 constant ''CUInt "INFO_HEAPLIMIT"
 constant ''CUInt "INFO_JCHANGED"
+#ifdef SUPPORT_JIT
 constant ''CUInt "INFO_JITSIZE"
+#endif
 constant ''CUInt "INFO_LASTCODETYPE"
 constant ''CUInt "INFO_LASTCODEUNIT"
 constant ''CUInt "INFO_MATCHEMPTY"
@@ -469,7 +476,9 @@ constant ''CUInt "NOTBOL"
 constant ''CUInt "NOTEOL"
 constant ''CUInt "NOTEMPTY"
 constant ''CUInt "NOTEMPTY_ATSTART"
+#ifdef SUPPORT_JIT
 constant ''CUInt "NO_JIT"
+#endif
 constant ''CUInt "PARTIAL_HARD"
 constant ''CUInt "PARTIAL_SOFT"
 
@@ -485,7 +494,9 @@ constant ''CInt "ERROR_CALLOUT"
 constant ''CInt "ERROR_DEPTHLIMIT"
 constant ''CInt "ERROR_HEAPLIMIT"
 constant ''CInt "ERROR_INTERNAL"
+#ifdef SUPPORT_JIT
 constant ''CInt "ERROR_JIT_STACKLIMIT"
+#endif
 constant ''CInt "ERROR_MATCHLIMIT"
 constant ''CInt "ERROR_NOMEMORY"
 constant ''CInt "ERROR_NULL"
