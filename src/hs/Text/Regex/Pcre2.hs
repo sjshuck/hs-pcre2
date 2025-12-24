@@ -3,8 +3,9 @@ module Text.Regex.Pcre2 (
     {-|
     === __Introduction__
 
-    Atop the low-level binding to the C API, we present a high-level interface
-    to add regular expressions to Haskell programs.
+    Atop the low-level binding to the C API (PCRE2 10.47, Unicode 16.0.0), we
+    present a high-level interface to add regular expressions to Haskell
+    programs.
 
     All input and output strings are strict `Data.Text.Text`, which maps to how
     PCRE2 operates in UTF-8 mode.
@@ -289,25 +290,7 @@ module Text.Regex.Pcre2 (
     -- * User errors
     SomePcre2Exception(),
     Pcre2Exception(),
-    Pcre2CompileException(),
-
-    -- * PCRE2 build configuration
-    defaultBsr,
-    compiledWidths,
-    defaultDepthLimit,
-    defaultHeapLimit,
-    supportsJit,
-    jitTarget,
-    linkSize,
-    effectivelinkSize,
-    defaultMatchLimit,
-    defaultNewline,
-    defaultIsNeverBackslashC,
-    defaultParensLimit,
-    defaultTablesLength,
-    unicodeVersion,
-    supportsUnicode,
-    pcreVersion)
+    Pcre2CompileException())
 where
 
 import Text.Regex.Pcre2.Internal
