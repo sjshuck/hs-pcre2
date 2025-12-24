@@ -208,11 +208,10 @@ data Option
     | Anchored  -- ^ Equivalent to beginning pattern with @^@.
     | BadEscapeIsLiteral  -- ^ Do not throw an error for unrecognized or
     -- malformed escapes.  /"This is a dangerous option."/
-    | Bsr Bsr  -- ^ Override what @\\R@ matches (default given by `defaultBsr`).
+    | Bsr Bsr  -- ^ Override what @\\R@ matches (default is `BsrUnicode`).
     | Caseless  -- ^ Case-insensitive match.  Equivalent to @(?i)@.
     | DepthLimit Word32  -- ^ Override maximum depth of nested backtracking
-    -- (default given by `defaultDepthLimit`).  Equivalent to
-    -- @(*LIMIT_DEPTH=@/number/@)@.
+    -- (default is 10,000,000).  Equivalent to @(*LIMIT_DEPTH=@/number/@)@.
     | DollarEndOnly  -- ^ Don't match @$@ with a newline at the end of the
     -- subject.
     | DotAll  -- ^ A dot also matches a (single-character) newline.  Equivalent
@@ -230,12 +229,12 @@ data Option
     -- @[]@.
     | FirstLine  -- ^ The match must begin in the first line of the subject.
     | HeapLimit Word32  -- ^ Override maximum heap memory (in kibibytes) used to
-    -- hold backtracking information (default given by `defaultHeapLimit`).
+    -- hold backtracking information (default is 20,000,000).
     -- Equivalent to @(*LIMIT_HEAP=@/number/@)@.
     | Literal  -- ^ Treat the pattern as a literal string.
     | MatchLimit Word32  -- ^ Override maximum value of the main matching loop's
-    -- internal counter (default given by `defaultMatchLimit`), as a simple CPU
-    -- throttle.  Equivalent to @(*LIMIT_MATCH=@/number/@)@.
+    -- internal counter (default is 10,000,000), as a simple CPU throttle.
+    -- Equivalent to @(*LIMIT_MATCH=@/number/@)@.
     | MatchLine  -- ^ Only match complete lines.  Equivalent to bracketing the
     -- pattern with @^(?:@/pattern/@)$@.
     | MatchUnsetBackRef  -- ^ A backreference to an unset capture group matches
@@ -249,8 +248,8 @@ data Option
     | NeverBackslashC  -- ^ Do not allow the unsafe @\\C@ sequence.
     | NeverUcp  -- ^ Don't count Unicode characters in some character classes
     -- such as @\\d@.  Overrides @(*UCP)@.
-    | Newline Newline  -- ^ Override what a newline is (default given by
-    -- `defaultNewline`).  Equivalent to @(*CRLF)@ or similar.
+    | Newline Newline  -- ^ Override what a newline is (default is `NewlineLf`).
+    -- Equivalent to @(*CRLF)@ or similar.
     | NoAutoCapture  -- ^ Disable numbered capturing parentheses.
     | NoAutoPossess  -- ^ Turn off some optimizations, possibly resulting in
     -- some callouts not being called.
@@ -268,7 +267,7 @@ data Option
     | OffsetLimit Word64  -- ^ Limit how far an unanchored search can advance in
     -- the subject.
     | ParensLimit Word32  -- ^ Override max depth of nested parentheses (default
-    -- given by `defaultParensLimit`).
+    -- is 250).
     | PartialHard  -- ^ If the subject ends without finding a complete match,
     -- stop trying alternatives and signal a partial match immediately.
     -- Currently we do this by throwing a `Pcre2Exception` but we should do
@@ -1185,99 +1184,3 @@ getErrorMessage errorCode = unsafePerformIO $ do
 -- it against a predicate, and throw an exception upon failure.
 check :: (CInt -> Bool) -> CInt -> IO ()
 check p = unless . p <*> throwIO . Pcre2Exception
-
--- * PCRE2 compile-time config
-
--- | Helper for getting PCRE2 compile-time config integers.
-getConfigNumeric :: CUInt -> CUInt
-getConfigNumeric what = unsafePerformIO $ alloca $ \ptr -> do
-    pcre2_config what ptr
-    peek ptr
-
--- | Helper for getting PCRE2 compile-time config strings.
-getConfigString :: CUInt -> Maybe Text
-getConfigString what = unsafePerformIO $ do
-    len <- pcre2_config what nullPtr
-    if len == pcre2_ERROR_BADOPTION
-        then return Nothing
-        -- FIXME Do we really need "+ 1" here?
-        -- FIXME allocaBytes looks wrong
-        else allocaBytes (fromIntegral (len + 1) * 2) $ \ptr -> do
-            pcre2_config what ptr
-            Just <$> Text.fromPtr ptr (fromIntegral len - 1)
-
--- | See t`Bsr`.
-defaultBsr :: Bsr
-defaultBsr = bsrFromC $ getConfigNumeric pcre2_CONFIG_BSR
-
--- | Which code widths PCRE2 is compiled to operate on.  Can be any combination
--- of 8, 16, and 32.  Should be @[8]@ but provided here for completeness.
-compiledWidths :: [Int]
-compiledWidths =
-    let bitmap = getConfigNumeric pcre2_CONFIG_COMPILED_WIDTHS
-    in [w | (b, w) <- [(1, 8), (2, 16), (4, 32)], b .&. bitmap /= 0]
-
--- | See `DepthLimit`.
-defaultDepthLimit :: Int
-defaultDepthLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_DEPTHLIMIT
-
--- | See `HeapLimit`.
-defaultHeapLimit :: Int
-defaultHeapLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_HEAPLIMIT
-
--- | Was PCRE2 built with JIT support?
-supportsJit :: Bool
-supportsJit = getConfigNumeric pcre2_CONFIG_JIT == 1
-
--- | A nice description of the CPU architecture JIT support is compiled for, if
--- any.
-jitTarget :: Maybe Text
-jitTarget = getConfigString pcre2_CONFIG_JITTARGET
-
--- | Number of bytes PCRE2 was instructed to use for internal linkage in
--- compiled regexes.
-linkSize :: Int
-linkSize = fromIntegral $ getConfigNumeric pcre2_CONFIG_LINKSIZE
-
--- | Number of bytes actually used for internal linkage in compiled regexes.
---
--- @since 2.2.3
-effectivelinkSize :: Int
-effectivelinkSize =
-    fromIntegral $ getConfigNumeric pcre2_CONFIG_EFFECTIVE_LINKSIZE
-
--- | See `MatchLimit`.
-defaultMatchLimit :: Int
-defaultMatchLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_MATCHLIMIT
-
--- | See t`Newline`.
-defaultNewline :: Newline
-defaultNewline = newlineFromC $ getConfigNumeric pcre2_CONFIG_NEWLINE
-
--- | See `NeverBackslashC`.
-defaultIsNeverBackslashC :: Bool
-defaultIsNeverBackslashC = getConfigNumeric pcre2_CONFIG_NEVER_BACKSLASH_C == 1
-
--- | See `ParensLimit`.
-defaultParensLimit :: Int
-defaultParensLimit = fromIntegral $ getConfigNumeric pcre2_CONFIG_PARENSLIMIT
-
--- | Size in bytes of PCRE2's built-in character processing tables.
-defaultTablesLength :: Int
-defaultTablesLength = fromIntegral $ getConfigNumeric pcre2_CONFIG_TABLES_LENGTH
-
--- | Unicode version string such as @8.0.0@, if Unicode is supported at all.
-unicodeVersion :: Maybe Text
-unicodeVersion = case getConfigString pcre2_CONFIG_UNICODE_VERSION of
-    Just v | Text.unpack v == "Unicode not supported" -> Nothing
-    maybeV                                            -> maybeV
-
--- | Was PCRE2 built with Unicode support?
-supportsUnicode :: Bool
-supportsUnicode = getConfigNumeric pcre2_CONFIG_UNICODE == 1
-
--- | Version of the built-in C library.  The versioning scheme is that PCRE
--- legacy is 8.x and PCRE2 is 10.x, so this should be @10.@/something/.
-pcreVersion :: Text
-pcreVersion = fromMaybe e $ getConfigString pcre2_CONFIG_VERSION where
-    e = error "Text.Regex.Pcre2.Internal.pcreVersion: unable to get string"
