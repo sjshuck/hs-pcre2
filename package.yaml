@@ -21,6 +21,12 @@ category:            Text
 # common to point users to the README.md file.
 description:         Please see the README on GitHub at <https://github.com/sjshuck/hs-pcre2>
 
+# NOTE Keep in sync with CI
+tested-with:
+- GHC == 9.10.3
+- GHC == 9.12.2
+- GHC == 9.14.1
+
 dependencies:
 - base >= 4.9 && < 5
 - containers

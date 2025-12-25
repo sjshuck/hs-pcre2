@@ -17,6 +17,10 @@ copyright:      2020-2025 Steven Shuck
 license:        Apache-2.0
 license-file:   LICENSE
 build-type:     Simple
+tested-with:
+    GHC == 9.10.3
+  , GHC == 9.12.2
+  , GHC == 9.14.1
 extra-source-files:
     README.md
     ChangeLog.md

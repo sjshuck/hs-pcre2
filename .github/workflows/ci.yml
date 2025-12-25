@@ -13,9 +13,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macOS-latest, windows-latest]
         ghc:
-          - 9.12.2
+          # NOTE Keep in sync with package.yaml
           - 9.10.3
-          - 9.8.4
+          - 9.12.2
+          - 9.14.1
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
