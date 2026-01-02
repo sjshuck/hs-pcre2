@@ -124,8 +124,9 @@ tests:
     dependencies:
     - pcre2
 
-    - hspec
     - microlens-platform
+    - tasty
+    - tasty-hunit
 
 benchmarks:
   pcre2-benchmarks:

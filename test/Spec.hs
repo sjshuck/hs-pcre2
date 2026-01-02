@@ -1,251 +1,250 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ViewPatterns #-}
 
 module Main where
 
 import           Control.Applicative     (Alternative)
-import           Control.Exception       (catch, evaluate, handle)
+import           Control.Exception
 import           Control.Monad           (forM_, void)
-import           Control.Monad.RWS.Lazy  (ask, evalRWS, tell)
+import           Control.Monad.RWS.Lazy  (RWS, ask, evalRWS, tell)
 import           Data.IORef              (modifyIORef', newIORef, readIORef)
 import           Data.List.NonEmpty      (NonEmpty(..))
 import           Data.Text               (Text)
 import qualified Data.Text               as Text
 import           Lens.Micro.Platform
-import           Test.Hspec
+import           Test.Tasty              (defaultMain, testGroup)
+import           Test.Tasty.HUnit
 import           Text.Printf             (printf)
 import           Text.Regex.Pcre2
 import           Text.Regex.Pcre2.Unsafe
 
 main :: IO ()
-main = hspec $ do
-    describe "partial application" $ do
-        it "only causes one compilation" $ do
+main = defaultMain $ testGroup "tests" [
+    testGroup "partial application" [
+        testCase "only causes one compilation" $ do
             onlyCausesOneCompilation $ \option ->
-                matchesOpt option "foo"
+                matchesOpt option "foo",
 
-        it "only causes one compilation (point-free expression)" $ do
+        testCase "only causes one compilation (point-free expression)" $ do
             onlyCausesOneCompilation $ \option ->
-                (||) <$> Text.null <*> matchesOpt option "foo"
+                (||) <$> Text.null <*> matchesOpt option "foo"],
 
-    describe "basic matching" $ do
+    testGroup "basic matching" [
         -- verifies that NotEmpty makes a difference, see below
-        it "matches an empty pattern to an empty subject" $ do
-            match "" "" `shouldBe` Just ""
+        testCase "matches an empty pattern to an empty subject" $ do
+            match "" "" @?= Just "",
 
-        it "works using matches" $ do
-            matches "(?i)foo" "FOO" `shouldBe` True
+        testCase "works using matches" $ do
+            matches "(?i)foo" "FOO" @?= True,
 
-        it "works using captures" $ do
+        testCase "works using captures" $ do
             case captures "(\\d{4})-(\\d{2})-(\\d{2})" submitted of
-                Just ne -> ne `shouldBe` "2020-10-20" :| ["2020", "10", "20"]
-                Nothing -> expectationFailure "didn't match"
+                Just ne -> ne @?= "2020-10-20" :| ["2020", "10", "20"]
+                Nothing -> assertFailure "didn't match",
 
-        it "is lazy" $ do
+        testCase "is lazy" $ do
             counter <- newIORef (0 :: Int)
             let callout = UnsafeCallout $ \_ -> do
                     modifyIORef' counter (+ 1)
                     return CalloutProceed
             take 3 (matchOpt callout "(?C1)a" "apples and bananas")
-                `shouldBe` ["a", "a", "a"]
-            readIORef counter `shouldReturn` 3
+                @?= ["a", "a", "a"]
+            readIORef counter >>= (@?= 3),
 
-        it ("fills up Alternative containers" `issue` 18) $ do
+        testCase ("fills up Alternative containers" `issue` 18) $ do
             let result :: (Alternative f) => f Text
                 result = match "\\d+" "123 456"
-            result `shouldBe` Just "123"
-            result `shouldBe` ["123", "456"]
+            result @?= Just "123"
+            result @?= ["123", "456"],
 
-        it ("is in UTF mode" `issue` 26) $ do
+        testCase ("is in UTF mode" `issue` 26) $ do
             matchesOpt (Bsr BsrUnicode) "\\R$" "line separator: \x2028"
-                `shouldBe` True
+                @?= True,
 
-        it ("doesn't use-after-free() for long matches" `issue` 39) $ do
+        testCase ("doesn't use-after-free() for long matches" `issue` 39) $ do
             let subj = Text.replicate 20000 "a"
-            length (captures @[] "." subj) `shouldBe` 20000
+            length (captures @[] "." subj) @?= 20000],
 
-    describe "lens-powered matching" $ do
-        let _nee :: Traversal' Text Text
-            _nee = _matchOpt (Caseless <> MatchWord) "nee"
-            promptNee = traverseOf (_nee . unpacked) $ \s -> tell [s] >> ask
-
-        it "can accrete effects while performing replacements" $ do
+    testGroup "lens-powered matching" [
+        testCase "can accrete effects while performing replacements" $ do
             let result = evalRWS
                     (promptNee "We are the knights who say...NEE!")
                     "NOO"
                     ()
-            result `shouldBe` ("We are the knights who say...NOO!", ["NEE"])
+            result @?= ("We are the knights who say...NOO!", ["NEE"]),
 
-        it "signals match failure by not targeting anything" $ do
+        testCase "signals match failure by not targeting anything" $ do
             let result = evalRWS
                     (promptNee "Shhhhh")
                     (error "should be unreachable")
                     ()
-            result `shouldBe` ("Shhhhh", [])
+            result @?= ("Shhhhh", []),
 
-        it "does not substitute when setting equal Text" $ do
+        testCase "does not substitute when setting equal Text" $ do
             let threeAndMiddle = _captures ". (.) ."
-            ("A A A" & threeAndMiddle .~ "A A A" :| ["B"]) `shouldBe` "A B A"
-            ("A A A" & threeAndMiddle .~ "A B A" :| ["A"]) `shouldBe` "A B A"
+            ("A A A" & threeAndMiddle .~ "A A A" :| ["B"]) @?= "A B A"
+            ("A A A" & threeAndMiddle .~ "A B A" :| ["A"]) @?= "A B A"],
 
-    describe "option handling" $ do
-        it "includes compile options" $ do
-            matchOpt Ungreedy "a+" "aaa" `shouldBe` Just "a"
+    testGroup "option handling" [
+        testCase "includes compile options" $ do
+            matchOpt Ungreedy "a+" "aaa" @?= Just "a",
 
-        it "includes extra compile options" $ do
-            matchOpt BadEscapeIsLiteral "\\j" "\\j" `shouldBe` Just "j"
+        testCase "includes extra compile options" $ do
+            matchOpt BadEscapeIsLiteral "\\j" "\\j" @?= Just "j",
 
-        it "includes compile context options" $ do
+        testCase "includes compile context options" $ do
             let bsrMatchesFF bsr = matchesOpt (Bsr bsr) "\\R" "\f"
-            bsrMatchesFF BsrUnicode `shouldBe` True
-            bsrMatchesFF BsrAnyCrlf `shouldBe` False
+            bsrMatchesFF BsrUnicode @?= True
+            bsrMatchesFF BsrAnyCrlf @?= False,
 
         -- We already know it includes compile recursion guards
 
-        it "includes match options" $ do
-            matchOpt NotEmpty "" "" `shouldBe` Nothing
+        testCase "includes match options" $ do
+            matchOpt NotEmpty "" "" @?= Nothing,
 
-        it "includes callouts" $ do
+        testCase "includes callouts" $ do
             calloutRanRef <- newIORef 0
             let callout = UnsafeCallout $ \_ -> do
                     modifyIORef' calloutRanRef (+ 1)
                     return CalloutProceed
-            matchOpt callout "(?C'foo')a(?C42)a" "aa" `shouldBe` Just "aa"
-            readIORef calloutRanRef `shouldReturn` 2
+            matchOpt callout "(?C'foo')a(?C42)a" "aa" @?= Just "aa"
+            readIORef calloutRanRef >>= (@?= 2),
 
-        it "includes substitution callouts" $ do
+        testCase "includes substitution callouts" $ do
             subCalloutRanRef <- newIORef 0
             let subCallout = UnsafeSubCallout $ \_ -> do
                     modifyIORef' subCalloutRanRef (+ 1)
                     return SubCalloutAccept
-            subOpt (subCallout <> SubGlobal) "a" "b" "aa" `shouldBe` "bb"
-            readIORef subCalloutRanRef `shouldReturn` 2
+            subOpt (subCallout <> SubGlobal) "a" "b" "aa" @?= "bb"
+            readIORef subCalloutRanRef >>= (@?= 2),
 
-        it "includes match context options" $ do
-            matchOpt (OffsetLimit 10) "b" "aaaaaaaaaaab" `shouldBe` Nothing
+        testCase "includes match context options" $ do
+            matchOpt (OffsetLimit 10) "b" "aaaaaaaaaaab" @?= Nothing],
 
-    describe "user errors" $ do
-        it "are thrown at match time" $ do
-            (broken @Maybe "foo" `seq` return ())
-                `shouldThrow` anyPcre2Exception
+    testGroup "user errors" [
+        testCase "are thrown at match time" $ do
+            assertThrow @SomePcre2Exception $
+                broken @Maybe "foo" `seq` return (),
 
-        it "are catchable using Control.Exception.evaluate" $ do
+        testCase "are catchable using Control.Exception.evaluate" $ do
             let example = handle @SomePcre2Exception (\_ -> return Nothing) $
                     evaluate $ broken "foo"
-            example `shouldReturn` Nothing
+            example >>= (@?= Nothing),
 
-        it "are catchable using instance Alternative IO" $ do
+        testCase "are catchable using instance Alternative IO" $ do
             let example = handle @SomePcre2Exception (\_ -> return "broken") $
                     broken "foo"
-            example `shouldReturn` "broken"
+            example >>= (@?= "broken")],
 
-    describe "native substitution" $ do
-        it "works using sub" $ do
+    testGroup "native substitution" [
+        testCase "works using sub" $ do
             let result = sub
                     "(\\w+) calling the (\\w+)"
                     "$2 calling the $1"
                     "the pot calling the kettle black"
-            result `shouldBe` "the kettle calling the pot black"
+            result @?= "the kettle calling the pot black",
 
-        it "works using gsub" $ do
-            gsub "a" "o" "apples and bananas" `shouldBe` "opples ond bononos"
+        testCase "works using gsub" $ do
+            gsub "a" "o" "apples and bananas" @?= "opples ond bononos"],
 
-    describe "regex :: QuasiQuoter" $ do
-        context "as an expression" $ do
-            it "works with parenthesized captures" $ do
+    testGroup "regex :: QuasiQuoter" [
+        testGroup "as an expression" [
+            testCase "works with parenthesized captures" $ do
                 case [regex|(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})|] submitted of
-                    Nothing -> expectationFailure "regex didn't match"
+                    Nothing -> assertFailure "regex didn't match"
                     Just cs -> do
                         let date = capture @0 cs
                             year = read @Int $ Text.unpack $ capture @"y" cs
-                        (date, year) `shouldBe` ("2020-10-20", 2020)
+                        (date, year) @?= ("2020-10-20", 2020),
 
-            it "works without parenthesized captures" $ do
+            testCase "works without parenthesized captures" $ do
                 let example = forM_ @Maybe ([regex|^\s+$|] "  ") $ \spaces ->
                         error $ "line has spaces only: " ++ show spaces
-                example `shouldThrow` anyErrorCall
+                assertThrow @ErrorCall example],
 
-        context "as a pattern" $ do
-            it "works with named captures" $ do
+        testGroup "as a pattern" [
+            testCase "works with named captures" $ do
                 case submitted of
                     [regex|(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})|] -> do
                         let year = read @Int $ Text.unpack y
-                        year `shouldBe` 2020
-                    _ -> expectationFailure "regex didn't match"
+                        year @?= 2020
+                    _ -> assertFailure "regex didn't match",
 
-            it ("works with possibly unset named captures" `issue` 4) $ do
+            testCase ("works with possibly unset named captures" `issue` 4) $ do
                 let f = fmap (capture @"b") . [regex|(?<a>a)|(?<b>b)|]
-                f "a" `shouldReturn` ""
-                f "b" `shouldReturn` "b"
+                f "a" >>= (@?= "")
+                f "b" >>= (@?= "b"),
 
-            it "works without named captures" $ do
+            testCase "works without named captures" $ do
                 case "abc" of
                     [regex|a(b)c|] -> return ()
-                    _              -> expectationFailure "regex didn't match"
+                    _              -> assertFailure "regex didn't match"]],
 
-    describe "_regex" $ do
-        it "works with parenthesized captures" $ do
+    testGroup "_regex" [
+        testCase "works with parenthesized captures" $ do
             -- Adapt the _captures example for use here
             let result = "Well bust my buttons!" &~ do
                     zoom [_regex|(\w+) my (\w+)|] $ do
                         _capture @1 . _head .= 'd'
                         _capture @2 %= Text.reverse
                     _last .= '?'
-            result `shouldBe` "Well dust my snottub?"
+            result @?= "Well dust my snottub?",
 
-        it "works without parenthesized captures" $ do
+        testCase "works without parenthesized captures" $ do
             let embeddedNumber :: Traversal' String Int
                 embeddedNumber = packed . [_regex|\d+|] . unpacked . _Show
                 result = "There are 14 competing standards"
                     & embeddedNumber %~ (+ 1)
-            result `shouldBe` "There are 15 competing standards"
+            result @?= "There are 15 competing standards"],
 
-    describe "Captures" $ do
-        let mkCaptures = [regex|a(b)(?<c>c)|] "abc"
+    testGroup "Captures" [
 
-        it "has a predictable Show instance" $ do
+        testCase "has a predictable Show instance" $ do
             cs <- mkCaptures
-            show cs `shouldBe` "Captures (\"abc\" :| [\"b\",\"c\"])"
+            show cs @?= "Captures (\"abc\" :| [\"b\",\"c\"])",
 
-        it "can have its underlying list extracted" $ do
+        testCase "can have its underlying list extracted" $ do
             cs <- mkCaptures
-            getCaptures cs `shouldBe` "abc" :| ["b", "c"]
+            getCaptures cs @?= "abc" :| ["b", "c"]],
 
-    describe "predictCapturesInfo" $ do
-        it ("analyzes captures groups' names" `issue` 45) $ do
-            predictCapturesInfo mempty "foo (?<bar>...) (?<a>[[:alpha:]]) (ba*z)"
-                `shouldReturn` (3, [("bar", 1), ("a", 2)])
+    testGroup "predictCapturesInfo" [
+        testCase ("analyzes captures groups' names" `issue` 45) $ do
+            info <- predictCapturesInfo mempty
+                "foo (?<bar>...) (?<a>[[:alpha:]]) (ba*z)"
+            info @?= (3, [("bar", 1), ("a", 2)])],
 
-    describe "an unset capture" $ do
-        it "is treated as empty" $ do
-            captures "(a)?" "" `shouldBe` Just ("" :| [""])
+    testGroup "an unset capture" [
+        testCase "is treated as empty" $ do
+            captures "(a)?" "" @?= Just ("" :| [""]),
 
-        it "is unchanged via Traversal'" $ do
-            set ([_regex|(a)?|] . _capture @1) "foo" "" `shouldBe` ""
+        testCase "is unchanged via Traversal'" $ do
+            set ([_regex|(a)?|] . _capture @1) "foo" "" @?= "",
 
-        it "permits other captures to be changed via Traversal'" $ do
-            set ([_regex|(a)?|] . _capture @0) "foo" "" `shouldBe` "foo"
+        testCase "permits other captures to be changed via Traversal'" $ do
+            set ([_regex|(a)?|] . _capture @0) "foo" "" @?= "foo"],
 
-    describe "Traversal'" $ do
-        it "supports global substitutions" $ do
-            set (_match "a") "o" "apples and bananas"
-                `shouldBe` "opples ond bononos"
+    testGroup "Traversal'" [
+        testCase "supports global substitutions" $ do
+            set (_match "a") "o" "apples and bananas" @?= "opples ond bononos",
 
-        it "converges in the presence of empty matches" $ do
-            length (match @[] "" "12345") `shouldBe` 6
+        testCase "converges in the presence of empty matches" $ do
+            length (match @[] "" "12345") @?= 6],
 
-    describe "PCRE2 build configuration" $ do
-        it ("includes Unicode support" `issue` 21) $ do
-            matchesOpt Ucp "\\w$" "aleph: \x2135" `shouldBe` True
+    testGroup "PCRE2 build configuration" [
+        testCase ("includes Unicode support" `issue` 21) $ do
+            matchesOpt Ucp "\\w$" "aleph: \x2135" @?= True]]
 
--- | Modify label of `describe`, `it`, etc. to include a link to a Github issue.
+-- | Modify label of `testGroup`, `testCase`, etc. to include a link to a Github
+-- issue.
 issue :: String -> Int -> String
 issue = printf "%s (https://github.com/sjshuck/hs-pcre2/issues/%d)"
 
-onlyCausesOneCompilation :: (Option -> Text -> a) -> Expectation
+onlyCausesOneCompilation :: (Option -> Text -> a) -> Assertion
 onlyCausesOneCompilation regexWithOpt = do
     counter <- newIORef (0 :: Int)
     let option = UnsafeCompileRecGuard $ \_ -> do
@@ -256,18 +255,28 @@ onlyCausesOneCompilation regexWithOpt = do
 
     run "foo"
     countAfterOnce <- getCount
-    countAfterOnce `shouldSatisfy` (> 0) -- probably 2!
+    countAfterOnce > 0  -- probably 2!
+        @? "compile recursion guard didn't run after first match"
 
     run "bar"
     run "baz"
     countAfterTwiceMore <- getCount
-    countAfterTwiceMore `shouldBe` countAfterOnce
+    countAfterTwiceMore == countAfterOnce
+        @? "compile recursion guard ran again"
 
-anyPcre2Exception :: Selector SomePcre2Exception
-anyPcre2Exception _ = True
+broken :: (Alternative f) => Text -> f Text
+broken = match "*"
 
 submitted :: Text
 submitted = "submitted 2020-10-20"
 
-broken :: (Alternative f) => Text -> f Text
-broken = match "*"
+promptNee :: Text -> RWS String [String] () Text
+promptNee = traverseOf (_nee . unpacked) $ \s -> tell [s] >> ask where
+    _nee = _matchOpt (Caseless <> MatchWord) "nee"
+
+mkCaptures :: IO (Captures '(2, '[ '("c", 2)]))
+mkCaptures = [regex|a(b)(?<c>c)|] "abc"
+
+assertThrow :: forall e a. (Exception e) => IO a -> Assertion
+assertThrow action =
+    try @e action >>= traverseOf_ _Right (\_ -> assertFailure "didn't throw")
