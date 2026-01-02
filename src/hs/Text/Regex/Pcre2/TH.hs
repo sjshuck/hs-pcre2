@@ -26,7 +26,6 @@ import           Data.Text                  (Text)
 import qualified Data.Text                  as Text
 import qualified Data.Text.Foreign          as Text
 import           Data.Type.Bool             (If)
-import           Data.Type.Equality         (type (==))
 import           Foreign
 import           Foreign.C                  (CUChar, CUInt)
 import           GHC.TypeLits               hiding (Text)
@@ -61,11 +60,10 @@ type CapturesInfo = (Nat, [(Symbol, Nat)])
 -- | Look up the number of a capture at compile time, either by number or by
 -- name.  Throw a helpful 'TypeError' if the index doesn't exist.
 type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
-    CaptNum (i :: Nat) '(hi, _) = If (i `CmpNat` hi == 'GT)
-        -- then
-        (TypeError (TypeLits.Text "No capture numbered " :<>: ShowType i))
-        -- else
-        i
+    CaptNum (i :: Nat) '(hi, _) = If (i <=? hi)
+        {- then -} i
+        {- else -} (TypeError
+            (TypeLits.Text "No capture numbered " :<>: ShowType i))
 
     CaptNum (i :: Symbol) '(_,  '(i, num) ': _)   = num
     CaptNum (i :: Symbol) '(hi, _         ': kvs) = CaptNum i '(hi, kvs)

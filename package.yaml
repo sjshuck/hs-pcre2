@@ -1,5 +1,5 @@
 name:                pcre2
-version:             2.2.3
+version:             2.3.0
 github:              "sjshuck/hs-pcre2"
 license:             Apache-2.0
 license-file:        LICENSE # [LICENSE, src/c/pcre2/LICENCE] doesn't work with stack sdist
@@ -21,6 +21,12 @@ category:            Text
 # common to point users to the README.md file.
 description:         Please see the README on GitHub at <https://github.com/sjshuck/hs-pcre2>
 
+# NOTE Keep in sync with CI
+tested-with:
+- GHC == 9.8.4
+- GHC == 9.10.3
+- GHC == 9.12.2
+
 dependencies:
 - base >= 4.9 && < 5
 - containers
@@ -28,6 +34,12 @@ dependencies:
 - mtl
 - template-haskell
 - text >= 2
+
+flags:
+  support-jit:
+    description: Whether to build with JIT support and export JIT-specific items.
+    default: false
+    manual: false
 
 library:
   source-dirs: src/hs
@@ -49,7 +61,7 @@ library:
   - src/c/pcre2/src/pcre2_error.c
   - src/c/pcre2/src/pcre2_extuni.c
   - src/c/pcre2/src/pcre2_find_bracket.c
-  - src/c/pcre2/src/pcre2_jit_compile.c
+  - src/c/pcre2/src/pcre2_jit_compile.c  # If support-jit is false, still required as stub
   - src/c/pcre2/src/pcre2_maketables.c
   - src/c/pcre2/src/pcre2_match.c
   - src/c/pcre2/src/pcre2_match_data.c
@@ -70,20 +82,19 @@ library:
   ghc-options:
   - -W
   - -optc=-DPCRE2_CODE_UNIT_WIDTH=8
-  - -optc=-DPCRE2_STATIC=1
+  - -optc=-DPCRE2_STATIC
   - -optc=-DSUPPORT_PCRE2_8
   - -optc=-Wno-incompatible-pointer-types
   cc-options:
   - -DHAVE_CONFIG_H
-  - -DHAVE_INTTYPES_H=1
-  - -DHAVE_LIMITS_H=1
-  - -DHAVE_MEMMOVE_H=1
-  - -DHAVE_STDINT_H=1
-  - -DHAVE_STDLIB_H=1
-  - -DHAVE_STRERROR_H=1
-  - -DHAVE_STRING_H=1
-  - -DSUPPORT_JIT=1
-  - -DSUPPORT_UNICODE=1
+  - -DHAVE_INTTYPES_H
+  - -DHAVE_LIMITS_H
+  - -DHAVE_MEMMOVE_H
+  - -DHAVE_STDINT_H
+  - -DHAVE_STDLIB_H
+  - -DHAVE_STRERROR_H
+  - -DHAVE_STRING_H
+  - -DSUPPORT_UNICODE
   exposed-modules:
   - Text.Regex.Pcre2
   - Text.Regex.Pcre2.Foreign
@@ -96,6 +107,11 @@ library:
     else:
       ghc-options:
       - -optc=-Wno-discarded-qualifiers
+  - condition: flag(support-jit)
+    cc-options:
+    - -DSUPPORT_JIT
+    cpp-options:
+    - -DSUPPORT_JIT
 
 tests:
   pcre2-test:
@@ -108,8 +124,9 @@ tests:
     dependencies:
     - pcre2
 
-    - hspec
     - microlens-platform
+    - tasty
+    - tasty-hunit
 
 benchmarks:
   pcre2-benchmarks:

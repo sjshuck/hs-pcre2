@@ -5,7 +5,7 @@ cabal-version: 1.12
 -- see: https://github.com/sol/hpack
 
 name:           pcre2
-version:        2.2.3
+version:        2.3.0
 synopsis:       Regular expressions via the PCRE2 C library (included)
 description:    Please see the README on GitHub at <https://github.com/sjshuck/hs-pcre2>
 category:       Text
@@ -17,6 +17,10 @@ copyright:      2020-2025 Steven Shuck
 license:        Apache-2.0
 license-file:   LICENSE
 build-type:     Simple
+tested-with:
+    GHC == 9.8.4
+  , GHC == 9.10.3
+  , GHC == 9.12.2
 extra-source-files:
     README.md
     ChangeLog.md
@@ -138,6 +142,11 @@ source-repository head
   type: git
   location: https://github.com/sjshuck/hs-pcre2
 
+flag support-jit
+  description: Whether to build with JIT support and export JIT-specific items.
+  manual: False
+  default: False
+
 library
   exposed-modules:
       Text.Regex.Pcre2
@@ -150,8 +159,8 @@ library
       Paths_pcre2
   hs-source-dirs:
       src/hs
-  ghc-options: -W -optc=-DPCRE2_CODE_UNIT_WIDTH=8 -optc=-DPCRE2_STATIC=1 -optc=-DSUPPORT_PCRE2_8 -optc=-Wno-incompatible-pointer-types
-  cc-options: -DHAVE_CONFIG_H -DHAVE_INTTYPES_H=1 -DHAVE_LIMITS_H=1 -DHAVE_MEMMOVE_H=1 -DHAVE_STDINT_H=1 -DHAVE_STDLIB_H=1 -DHAVE_STRERROR_H=1 -DHAVE_STRING_H=1 -DSUPPORT_JIT=1 -DSUPPORT_UNICODE=1
+  ghc-options: -W -optc=-DPCRE2_CODE_UNIT_WIDTH=8 -optc=-DPCRE2_STATIC -optc=-DSUPPORT_PCRE2_8 -optc=-Wno-incompatible-pointer-types
+  cc-options: -DHAVE_CONFIG_H -DHAVE_INTTYPES_H -DHAVE_LIMITS_H -DHAVE_MEMMOVE_H -DHAVE_STDINT_H -DHAVE_STDLIB_H -DHAVE_STRERROR_H -DHAVE_STRING_H -DSUPPORT_UNICODE
   include-dirs:
       src/c
       src/c/pcre2/src
@@ -199,6 +208,9 @@ library
     ghc-options: -optc=-Wno-ignored-qualifiers
   else
     ghc-options: -optc=-Wno-discarded-qualifiers
+  if flag(support-jit)
+    cpp-options: -DSUPPORT_JIT
+    cc-options: -DSUPPORT_JIT
 
 test-suite pcre2-test
   type: exitcode-stdio-1.0
@@ -211,11 +223,12 @@ test-suite pcre2-test
   build-depends:
       base >=4.9 && <5
     , containers
-    , hspec
     , microlens
     , microlens-platform
     , mtl
     , pcre2
+    , tasty
+    , tasty-hunit
     , template-haskell
     , text >=2
   default-language: Haskell2010

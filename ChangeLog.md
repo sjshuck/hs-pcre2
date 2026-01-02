@@ -1,5 +1,15 @@
 # Changelog and Acknowledgements
 
+## 2.3.0
+* Disabled building JIT by default.
+  * Removed various JIT-related functions and constants from
+    `Text.Regex.Pcre2.Foreign`.  No other modules were affected.
+  * A 30&ndash;40% improvement is observed in both build time and binary output
+    size.
+  * JIT may be re-enabled with the `support-jit` flag.
+* Removed PCRE2 compile-time config constants.  The info they produce is now
+  hard-coded in the Haddock docs.
+
 ## 2.2.3
 * Exposed `CapturesInfo` kind of type-level regex info.
 * Exposed `predictCapturesInfo` for producing value-level of same, implementing
