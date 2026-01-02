@@ -23,9 +23,9 @@ description:         Please see the README on GitHub at <https://github.com/sjsh
 
 # NOTE Keep in sync with CI
 tested-with:
+- GHC == 9.8.4
 - GHC == 9.10.3
 - GHC == 9.12.2
-- GHC == 9.14.1
 
 dependencies:
 - base >= 4.9 && < 5
