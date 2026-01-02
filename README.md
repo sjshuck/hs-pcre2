@@ -91,4 +91,4 @@ are recommended instead of this library for the very best performance.
 PCRE2 is distributed under the [3-clause BSD](https://www.pcre.org/licence.txt) license.
 
 ## Main Author
-&copy;2020&ndash;2025 Steven Shuck
+&copy;2020&ndash;2026 Steven Shuck

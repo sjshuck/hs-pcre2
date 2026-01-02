@@ -5,7 +5,7 @@ license:             Apache-2.0
 license-file:        LICENSE # [LICENSE, src/c/pcre2/LICENCE] doesn't work with stack sdist
 author:              "Steven Shuck and contributors"
 maintainer:          "stevenjshuck@gmail.com"
-copyright:           "2020-2025 Steven Shuck"
+copyright:           "2020-2026 Steven Shuck"
 
 extra-source-files:
 - README.md

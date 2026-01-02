@@ -13,7 +13,7 @@ homepage:       https://github.com/sjshuck/hs-pcre2#readme
 bug-reports:    https://github.com/sjshuck/hs-pcre2/issues
 author:         Steven Shuck and contributors
 maintainer:     stevenjshuck@gmail.com
-copyright:      2020-2025 Steven Shuck
+copyright:      2020-2026 Steven Shuck
 license:        Apache-2.0
 license-file:   LICENSE
 build-type:     Simple
