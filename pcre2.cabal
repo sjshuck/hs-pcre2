@@ -240,17 +240,17 @@ benchmark pcre2-benchmarks
       Paths_pcre2
   hs-source-dirs:
       bench
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -rtsopts
   build-depends:
       base >=4.9 && <5
     , containers
-    , criterion
     , microlens
     , microlens-platform
     , mtl
     , pcre-light
     , pcre2
     , regex-pcre-builtin
+    , tasty-bench
     , template-haskell
     , text >=2
   default-language: Haskell2010

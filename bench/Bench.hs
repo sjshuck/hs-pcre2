@@ -6,11 +6,11 @@
 
 module Main where
 
-import           Criterion.Main
 import           Data.List.NonEmpty          (NonEmpty(..))
 import qualified Data.Text                   as Text
 import           Lens.Micro.Platform
 import           System.IO.Unsafe            (unsafePerformIO)
+import           Test.Tasty.Bench
 import qualified Text.Regex.PCRE
 import qualified Text.Regex.PCRE.Light.Char8
 import qualified Text.Regex.PCRE.String
