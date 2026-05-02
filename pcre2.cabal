@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.38.1.
+-- This file has been generated from package.yaml by hpack version 0.39.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -203,7 +203,7 @@ library
     , mtl
     , template-haskell
     , text >=2
-  default-language: Haskell2010
+  default-language: GHC2021
   if os(darwin)
     ghc-options: -optc=-Wno-ignored-qualifiers
   else
@@ -231,7 +231,7 @@ test-suite pcre2-test
     , tasty-hunit
     , template-haskell
     , text >=2
-  default-language: Haskell2010
+  default-language: GHC2021
 
 benchmark pcre2-benchmarks
   type: exitcode-stdio-1.0
@@ -253,4 +253,4 @@ benchmark pcre2-benchmarks
     , tasty-bench
     , template-haskell
     , text >=2
-  default-language: Haskell2010
+  default-language: GHC2021

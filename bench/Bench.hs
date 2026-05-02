@@ -1,21 +1,20 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ViewPatterns #-}
 
 module Main where
 
-import           Data.List.NonEmpty          (NonEmpty(..))
-import qualified Data.Text                   as Text
-import           Lens.Micro.Platform
-import           System.IO.Unsafe            (unsafePerformIO)
-import           Test.Tasty.Bench
-import qualified Text.Regex.PCRE
-import qualified Text.Regex.PCRE.Light.Char8
-import qualified Text.Regex.PCRE.String
-import qualified Text.Regex.PCRE.Text
-import           Text.Regex.Pcre2
+import Data.List.NonEmpty          (NonEmpty(..))
+import Data.Text                   qualified as Text
+import Lens.Micro.Platform
+import System.IO.Unsafe            (unsafePerformIO)
+import Test.Tasty.Bench
+import Text.Regex.PCRE             qualified
+import Text.Regex.PCRE.Light.Char8 qualified
+import Text.Regex.PCRE.String      qualified
+import Text.Regex.PCRE.Text        qualified
+import Text.Regex.Pcre2
 
 main :: IO ()
 main = defaultMain [

@@ -290,8 +290,8 @@ module Text.Regex.Pcre2 (
     -- * User errors
     SomePcre2Exception(),
     Pcre2Exception(),
-    Pcre2CompileException())
-where
+    Pcre2CompileException(),
+) where
 
 import Text.Regex.Pcre2.Internal
 import Text.Regex.Pcre2.TH

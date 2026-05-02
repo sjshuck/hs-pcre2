@@ -35,6 +35,8 @@ dependencies:
 - template-haskell
 - text >= 2
 
+language: GHC2021
+
 flags:
   support-jit:
     description: Whether to build with JIT support and export JIT-specific items.

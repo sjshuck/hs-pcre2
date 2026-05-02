@@ -28,8 +28,8 @@ module Text.Regex.Pcre2.Unsafe (
     CalloutIndex(..),
     CalloutResult(..),
     SubCalloutInfo(..),
-    SubCalloutResult(..))
-where
+    SubCalloutResult(..),
+) where
 
 import Text.Regex.Pcre2.Internal
 import Text.Regex.Pcre2.TH

@@ -1,43 +1,38 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Text.Regex.Pcre2.TH where
 
-import           Control.Applicative        (Alternative(..))
-import           Control.Monad              (forM)
-import           Control.Monad.State.Strict (evalStateT)
-import           Data.IORef
-import           Data.List                  (sortBy)
-import           Data.List.NonEmpty         (NonEmpty)
-import           Data.Map.Lazy              (Map)
-import qualified Data.Map.Lazy              as Map
-import           Data.Ord                   (comparing)
-import           Data.Proxy                 (Proxy(..))
-import           Data.Text                  (Text)
-import qualified Data.Text                  as Text
-import qualified Data.Text.Foreign          as Text
-import           Data.Type.Bool             (If)
-import           Foreign
-import           Foreign.C                  (CUChar, CUInt)
-import           GHC.TypeLits               hiding (Text)
-import qualified GHC.TypeLits               as TypeLits
-import           Language.Haskell.TH
-import           Language.Haskell.TH.Quote
-import           Language.Haskell.TH.Syntax (liftData)
-import           Lens.Micro
-import           Lens.Micro.Extras          (view)
-import           System.IO.Unsafe           (unsafePerformIO)
-import           Text.Regex.Pcre2.Foreign
-import           Text.Regex.Pcre2.Internal
+import Control.Applicative        (Alternative(..))
+import Control.Monad              (forM)
+import Control.Monad.State.Strict (evalStateT)
+import Data.IORef
+import Data.List                  (sortBy)
+import Data.List.NonEmpty         (NonEmpty)
+import Data.Map.Lazy              (Map)
+import Data.Map.Lazy              qualified as Map
+import Data.Ord                   (comparing)
+import Data.Proxy                 (Proxy(..))
+import Data.Text                  (Text)
+import Data.Text                  qualified as Text
+import Data.Text.Foreign          qualified as Text
+import Data.Type.Bool             (If)
+import Foreign
+import Foreign.C                  (CUChar, CUInt)
+import GHC.TypeLits               hiding (Text)
+import GHC.TypeLits               qualified as TypeLits
+import Language.Haskell.TH
+import Language.Haskell.TH.Quote  (QuasiQuoter(..))
+import Language.Haskell.TH.Syntax (liftData)
+import Lens.Micro
+import Lens.Micro.Extras          (view)
+import System.IO.Unsafe           (unsafePerformIO)
+import Text.Regex.Pcre2.Foreign
+import Text.Regex.Pcre2.Internal
 
 -- | A wrapper around a list of captures that carries additional type-level
 -- information about the number and names of those captures.
@@ -59,7 +54,8 @@ type CapturesInfo = (Nat, [(Symbol, Nat)])
 
 -- | Look up the number of a capture at compile time, either by number or by
 -- name.  Throw a helpful 'TypeError' if the index doesn't exist.
-type family CaptNum (i :: k) (info :: CapturesInfo) :: Nat where
+type CaptNum :: k -> CapturesInfo -> Nat
+type family CaptNum i info where
     CaptNum (i :: Nat) '(hi, _) = If (i <=? hi)
         {- then -} i
         {- else -} (TypeError

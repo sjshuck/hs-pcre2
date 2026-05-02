@@ -1,35 +1,32 @@
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Text.Regex.Pcre2.Internal where
 
-import           Control.Applicative        (Alternative(..))
-import           Control.Exception
-import           Control.Monad
-import           Control.Monad.Cont
-import           Control.Monad.State.Strict
-import           Data.Either                (partitionEithers)
-import           Data.Foldable              (foldl', toList)
-import           Data.Functor.Identity      (Identity(..))
-import           Data.IORef
-import           Data.List.NonEmpty         (NonEmpty(..))
-import           Data.Maybe                 (fromMaybe)
-import           Data.Monoid                (Alt(..), First)
-import           Data.Proxy                 (Proxy(..))
-import           Data.Text                  (Text)
-import qualified Data.Text                  as Text
-import qualified Data.Text.Foreign          as Text
-import           Data.Typeable              (cast)
-import           Foreign
-import           Foreign.C.Types            (CInt(..), CUChar, CUInt(..))
-import           Lens.Micro
-import           Lens.Micro.Extras          (preview, view)
-import           System.IO.Unsafe           (unsafePerformIO)
-import           Text.Regex.Pcre2.Foreign
+import Control.Applicative        (Alternative(..))
+import Control.Exception
+import Control.Monad
+import Control.Monad.Cont
+import Control.Monad.State.Strict
+import Data.Either                (partitionEithers)
+import Data.Foldable              (foldl', toList)
+import Data.Functor.Identity      (Identity(..))
+import Data.IORef
+import Data.List.NonEmpty         (NonEmpty(..))
+import Data.Maybe                 (fromMaybe)
+import Data.Monoid                (Alt(..), First)
+import Data.Proxy                 (Proxy(..))
+import Data.Text                  (Text)
+import Data.Text                  qualified as Text
+import Data.Text.Foreign          qualified as Text
+import Data.Typeable              (cast)
+import Foreign
+import Foreign.C.Types            (CInt(..), CUChar, CUInt(..))
+import Lens.Micro
+import Lens.Micro.Extras          (preview, view)
+import System.IO.Unsafe           (unsafePerformIO)
+import Text.Regex.Pcre2.Foreign
 
 -- * General utilities
 

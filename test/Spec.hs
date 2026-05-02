@@ -2,26 +2,24 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ViewPatterns #-}
 
 module Main where
 
-import           Control.Applicative     (Alternative)
-import           Control.Exception
-import           Control.Monad           (forM_, void)
-import           Control.Monad.RWS.Lazy  (RWS, ask, evalRWS, tell)
-import           Data.IORef              (modifyIORef', newIORef, readIORef)
-import           Data.List.NonEmpty      (NonEmpty(..))
-import           Data.Text               (Text)
-import qualified Data.Text               as Text
-import           Lens.Micro.Platform
-import           Test.Tasty              (defaultMain, testGroup)
-import           Test.Tasty.HUnit
-import           Text.Printf             (printf)
-import           Text.Regex.Pcre2
-import           Text.Regex.Pcre2.Unsafe
+import Control.Applicative     (Alternative)
+import Control.Exception       (ErrorCall, Exception, evaluate, handle, try)
+import Control.Monad           (forM_, void)
+import Control.Monad.RWS.Lazy  (RWS, ask, evalRWS, tell)
+import Data.IORef              (modifyIORef', newIORef, readIORef)
+import Data.List.NonEmpty      (NonEmpty(..))
+import Data.Text               (Text)
+import Data.Text               qualified as Text
+import Lens.Micro.Platform
+import Test.Tasty              (defaultMain, testGroup)
+import Test.Tasty.HUnit        (Assertion, (@?), (@?=), assertFailure, testCase)
+import Text.Printf             (printf)
+import Text.Regex.Pcre2
+import Text.Regex.Pcre2.Unsafe
 
 main :: IO ()
 main = defaultMain $ testGroup "tests" [
