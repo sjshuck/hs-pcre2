@@ -51,9 +51,9 @@ main = defaultMain [
             in bar],
 
     bgroup "texts" [
-        bgroupTexts "short" strings,
+        bgroupTexts "shorter" strings,
 
-        bgroupTexts "long" (
+        bgroupTexts "longer" (
             "foo (ba*r) baz",
             "foo b" ++ replicate 1000 'a' ++ "r baz")],
 

@@ -66,14 +66,9 @@ forMOf kv'd file $ execStateT $ do
   complete, exposed Haskell binding.
 
 ## Performance
-Currently we are slower than other libraries.  The difference is less pronounced
-for `Text` where no conversions are necessary to use this library.
+Currently (2026-05-02) we are much slower than other libraries.
 
-| Operation                   | `pcre2`    | `regex-pcre-builtin` | `pcre-light` |
-| :--                         |        --: |                  --: |          --: |
-| Matching a `String`         | 1.22 &mu;s |           0.34 &mu;s |   0.23 &mu;s |
-| Matching a `Text` (shorter) | 1.22 &mu;s |           0.93 &mu;s |   0.29 &mu;s |
-| Matching a `Text` (longer)  | 1.89 &mu;s |           1.52 &mu;s |  11.12 &mu;s |
+![Benchmarks graph](bench/bench.svg)
 
 If it's really regex processing that's causing a bottleneck,
 [pcre-light](https://hackage.haskell.org/package/pcre-light)/[-heavy](https://hackage.haskell.org/package/pcre-heavy)/[lens-regex-pcre](https://hackage.haskell.org/package/lens-regex-pcre)
