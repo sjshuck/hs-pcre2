@@ -1153,7 +1153,8 @@ instance Show Pcre2CompileException where
             -- FIXME Do not use Text.length since offsets are in code units
             | offset' == Text.length patt = pattLines
             | otherwise                   = insertCaretLine numberedPattLines
-        offset' = fromIntegral offset
+        -- See https://github.com/PCRE2Project/pcre2/issues/906
+        offset' = max (fromIntegral offset - 1) 0
         pattLines = unchompedLines $ Text.unpack patt
         numberedPattLines = zip [0 :: Int ..] pattLines
         (caretRow, caretCol) = (!! offset') $ do

@@ -139,7 +139,7 @@ main = defaultMain $ testGroup "tests" [
                     broken "foo"
             example >>= (@?= "broken"),
 
-        testCase "show the caret in the right place" $ do
+        testCase ("show the caret in the right place" `issue` 52) $ do
             infoOrE <- try @Pcre2CompileException $
                 predictCapturesInfo mempty "abc)def"
             msg <- case infoOrE of
