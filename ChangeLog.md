@@ -1,5 +1,9 @@
 # Changelog and Acknowledgements
 
+## 2.3.1
+* Fixed [#52](https://github.com/sjshuck/hs-pcre2/issues/52) where the caret
+  appeared in the wrong place.
+
 ## 2.3.0
 * Disabled building JIT by default.
   * Removed various JIT-related functions and constants from
