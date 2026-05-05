@@ -12,8 +12,8 @@ import Control.Monad           (forM_, unless, void)
 import Control.Monad.RWS.Lazy  (RWS, ask, evalRWS, tell)
 import Data.IORef              (modifyIORef', newIORef, readIORef)
 import Data.List.NonEmpty      (NonEmpty(..))
-import Data.Text               qualified as Text
 import Data.Text               (Text)
+import Data.Text               qualified as Text
 import Lens.Micro.Platform
 import Test.Tasty              (defaultMain, testGroup)
 import Test.Tasty.HUnit
