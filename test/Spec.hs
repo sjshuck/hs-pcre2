@@ -7,8 +7,8 @@
 module Main where
 
 import Control.Applicative     (Alternative)
-import Control.Exception       (ErrorCall, Exception, evaluate, handle, try)
-import Control.Monad           (forM_, void)
+import Control.Exception
+import Control.Monad           (forM_, unless, void)
 import Control.Monad.RWS.Lazy  (RWS, ask, evalRWS, tell)
 import Data.IORef              (modifyIORef', newIORef, readIORef)
 import Data.List.NonEmpty      (NonEmpty(..))
@@ -16,7 +16,7 @@ import Data.Text               (Text)
 import Data.Text               qualified as Text
 import Lens.Micro.Platform
 import Test.Tasty              (defaultMain, testGroup)
-import Test.Tasty.HUnit        (Assertion, (@?), (@?=), assertFailure, testCase)
+import Test.Tasty.HUnit
 import Text.Printf             (printf)
 import Text.Regex.Pcre2
 import Text.Regex.Pcre2.Unsafe
@@ -137,7 +137,20 @@ main = defaultMain $ testGroup "tests" [
         testCase "are catchable using instance Alternative IO" $ do
             let example = handle @SomePcre2Exception (\_ -> return "broken") $
                     broken "foo"
-            example >>= (@?= "broken")],
+            example >>= (@?= "broken"),
+
+        testCase ("show the caret in the right place" `issue` 52) $ do
+            infoOrE <- try @Pcre2CompileException $
+                predictCapturesInfo mempty "abc)def"
+            msg <- case infoOrE of
+                Right _ -> assertFailure "regex compiled"
+                Left e  -> return $ displayException e
+            case lines msg of
+                [_, pattLine, caretLine] ->
+                    assertBool ("caret doesn't line up:\n" ++ msg) $
+                        (')', '^') `elem` zip pattLine caretLine
+                _ -> assertFailure $
+                    "didn't get 3-line message, got:\n" ++ msg],
 
     testGroup "native substitution" [
         testCase "works using sub" $ do
