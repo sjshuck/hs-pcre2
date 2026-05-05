@@ -7,11 +7,14 @@ Regular expressions for Haskell.
 
 ## Teasers
 ```haskell
-licensePlate :: Text -> Maybe Text
-licensePlate = match "[A-Z]{3}[0-9]{3,4}"
+licensePlateRegex :: (Alternative f) => Text -> f Text
+licensePlateRegex = match "[A-Z]{3}[0-9]{3,4}"
 
-licensePlates :: Text -> [Text]
-licensePlates = match "[A-Z]{3}[0-9]{3,4}"
+firstLicensePlate :: Text -> Maybe Text
+firstLicensePlate = licensePlateRegex
+
+allLicensePlates :: Text -> [Text]
+allLicensePlates = licensePlateRegex
 ```
 ```haskell
 case "The quick brown fox" of
@@ -31,16 +34,21 @@ let kv'd :: Traversal' String (Captures _)
         \s*$          # Ignore trailing whitespace
     |]
 
-forMOf kv'd file $ execStateT $ do
-    k <- gets $ capture @1
-    v <- gets $ capture @2
-    liftIO $ Text.putStrLn $ "found " <> k <> " set to " <> v
+forOf kv'd file $ \kv -> do
+    let k = capture @1 kv
+        v = capture @2 kv
 
-    case myMap ^. at k of
+    Text.putStrLn $ "found " <> k <> " set to " <> v
+
+    kv' <- case Map.lookup k replacements of
         Just v' | v /= v' -> do
-            liftIO $ Text.putStrLn $ "setting " <> k <> " to " <> v'
-            _capture @2 .= v'
-        _ -> liftIO $ Text.putStrLn $ "no change for " <> k
+            Text.putStrLn $ "setting " <> k <> " to " <> v'
+            return $ set (_capture @2) v' kv
+        _ -> do
+            Text.putStrLn $ "no change for " <> k
+            return kv
+
+    ...
 ```
 
 ## Features
@@ -49,7 +57,6 @@ forMOf kv'd file $ execStateT $ do
   `-> result`.
 * No [custom typeclasses](https://hackage.haskell.org/package/regex-base/docs/Text-Regex-Base-RegexLike.html#t:RegexContext).
 * A single datatype for both compile and match options, the `Option` monoid.
-* UTF-8 `Text` everywhere.
 * Match success expressed via `Alternative`.
 * Opt-in Template Haskell facilities for compile-time verification of patterns,
   indexing captures, and memoizing inline regexes.
@@ -80,6 +87,7 @@ are recommended instead of this library for the very best performance.
   some upstream changes as well but in theory it's possible.
 * Improve compile time.
   * Support external `libpcre2` maybe.
+* Support more types than just `Text`.
 
 ## License
 [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0.html).
