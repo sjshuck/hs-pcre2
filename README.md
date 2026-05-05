@@ -75,7 +75,7 @@ forOf kv'd file $ \kv -> do
 ## Performance
 Currently (2026-05-02) we are much slower than other libraries.
 
-![Benchmarks graph](bench/bench.svg)
+![Benchmarks graph](https://raw.githubusercontent.com/sjshuck/hs-pcre2/master/bench/bench.svg)
 
 If it's really regex processing that's causing a bottleneck,
 [pcre-light](https://hackage.haskell.org/package/pcre-light)/[-heavy](https://hackage.haskell.org/package/pcre-heavy)/[lens-regex-pcre](https://hackage.haskell.org/package/lens-regex-pcre)
