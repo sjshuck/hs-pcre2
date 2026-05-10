@@ -67,9 +67,7 @@ mkFunPtrWithERef mkFunPtr = ContT $ \continue -> do
 
 -- ** Fast `Text` slicing
 
-data Slice = Slice
-    {-# UNPACK #-} !Text.I8
-    {-# UNPACK #-} !Text.I8
+data Slice = Slice !Text.I8 !Text.I8
 
 -- | Zero-copy slice a 'Text'.  An unset capture is represented by a
 -- `pcre2_UNSET` range and is interpreted in this library as `Text.empty`.
@@ -567,8 +565,8 @@ type ExtractOpts = StateT [AppliedOption] IO
 
 -- | Use a fake @Prism'@ to extract a category of options.
 extractOptsOf :: Getting (First a) AppliedOption a -> ExtractOpts [a]
-extractOptsOf prism = state $ partitionEithers . map discrim where
-    discrim opt = maybe (Right opt) Left $ opt ^? prism
+extractOptsOf l = state $ partitionEithers . map discrim where
+    discrim opt = maybe (Right opt) Left $ opt ^? l
 
 -- | Helper for `extractCode`.  Create a @pcre2_compile_context@ pointer if
 -- necessary, apply any options, return it, and clean up after use.
